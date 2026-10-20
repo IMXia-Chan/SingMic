@@ -238,6 +238,8 @@ python tools/smoke_editor.py [录音路径]   # 不给路径就用 recordings/ �
 
 本项目**不提供技术支持,也不对任何使用后果负责**。个人项目,声明在这里,不是为了免责,是为了不误导。
 
+**不接受 pull request**(版权保持单一归属,原因见 [CONTRIBUTING.md](CONTRIBUTING.md));bug 报告、使用问题、想法都欢迎开 issue。
+
 
 ## 2026-10-20:逐音精修 + 原唱条(两种修音,一张图上配合)
 
