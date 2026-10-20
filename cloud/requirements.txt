@@ -1,0 +1,7 @@
+# 推理服务自己用到的;RVC 训练/推理的其余依赖按它自己的 requirements 装
+fastapi>=0.110
+uvicorn[standard]>=0.27
+numpy>=1.24
+soundfile>=0.12
+librosa>=0.10
+scipy>=1.10

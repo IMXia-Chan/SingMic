@@ -1,0 +1,32 @@
+SingMic
+Copyright 2026 IMXia-Chan
+
+SingMic itself is licensed under the GNU Affero General Public License v3.0;
+see LICENSE. Commercial licensing is available on request — see README.
+
+This product includes software and model weights developed by third parties:
+
+1. DeepFilterNet3 (noise suppression)
+   - Project: https://github.com/Rikorose/DeepFilterNet
+   - License: MIT (the upstream project is dual-licensed MIT / Apache-2.0)
+   - The file `_ai_try/model/denoiser_model.onnx` and the accompanying
+     `initial_states.npz` / `meta.json` are model weights obtained from the
+     upstream distribution.
+   - The Python package `deepfilter_stream` is an optional dependency and is
+     NOT redistributed in this repository; install it with pip.
+
+2. pedalboard (optional VST3 hosting)
+   - Project: https://github.com/spotify/pedalboard
+   - License: GPL-3.0
+   - State: **optional external dependency**, listed in `requirements-vst.txt`.
+     It is NOT redistributed in this repository and is NOT imported by the
+     server process. It is used only inside a separate helper process
+     (`studio_vst_worker.py`) that the studio spawns on demand for offline
+     rendering. Without it installed, the rest of SingMic runs normally and
+     the VST tab reports that the host is unavailable.
+   - VST3 plug-ins themselves are supplied by the user; no plug-in binaries
+     are distributed with this repository, and their licenses are the user's
+     responsibility.
+
+All other source code in this repository was written for SingMic, unless a file
+states otherwise.

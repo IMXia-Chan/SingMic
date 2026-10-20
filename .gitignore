@@ -1,0 +1,32 @@
+# 录音与工程产物 —— 只在本机,永远不进仓库
+recordings/
+projects/
+music/
+
+# 用户放进去的 VST3 插件(二进制与许可证都归使用者,不随仓库分发)
+vst/
+
+# AI 降噪的可选包(用 pip 装,不随仓库分发)
+_ai_try/deepfilter_stream/
+_ai_try/deepfilter_stream-*.dist-info/
+_ai_try/platformdirs/
+_ai_try/platformdirs-*.dist-info/
+_ai_try/bin/
+
+# 运行时产物
+__pycache__/
+*.py[cod]
+*.log
+_shot_*
+_tmp_*
+_saved_params.json
+config.local.toml
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# 训练好的音色模型(重新下载即可,不进仓库)
+voice_model/

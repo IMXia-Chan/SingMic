@@ -1,0 +1,22 @@
+[Unit]
+Description=SingMic voice serve (RVC inference)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=singmic
+WorkingDirectory=/opt/singmic
+EnvironmentFile=/etc/singmic/voice.env
+Environment=PYTHONPATH=/opt/rvc
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 -m uvicorn serve:app --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=5
+# 模型在 data 盘上,挂载慢一点就多等几秒
+TimeoutStartSec=120
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

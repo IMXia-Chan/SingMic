@@ -1,0 +1,19 @@
+# 运行 SingMic 服务需要的东西
+numpy
+scipy
+soundfile
+sounddevice
+soundcard
+fastapi
+uvicorn
+lameenc
+
+# 跑 tools/ 里的端到端冒烟(浏览 Edge 无头)才需要
+# websockets
+# websocket-client
+
+# 可选:AI 降噪(DeepFilterNet3)
+#   包:deepfilter_stream
+#   模型:本仓库自带 _ai_try/model/denoiser_model.onnx
+#   不装也能跑,只是 AI 那一级不可用(见 ai_denoise.py)
+# deepfilter_stream

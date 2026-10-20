@@ -1,0 +1,6 @@
+# 可选:VST3 插件宿主(工作室的「VST」页)
+#
+# ★ pedalboard 是 GPL-3.0。本项目只在**独立子进程**(studio_vst_worker.py)里调用它,
+#   主程序(server.py)从不 import;不装这一项,主程序照常运行,只是 VST 页显示黄字。
+# ★ 插件本身的许可证由使用者自己负责,本项目不附带任何插件二进制。
+pedalboard>=0.9.26

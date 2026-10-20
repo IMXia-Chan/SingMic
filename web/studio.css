@@ -1,0 +1,453 @@
+/* SingMic Studio —— FL 那种深色工作区 */
+:root{
+  --bg:#0b0d12; --bg2:#12151d; --bg3:#181c26; --line:#242a38;
+  --fg:#d8dee9; --dim:#7b8598; --acc:#3fb6ff; --acc2:#ff8a3d;
+  --sel:#2b4d6b; --rec:#ff4d6d; --ok:#3ddc97; --warn:#ffc857;
+  --headW:168px; --rulerH:30px;
+  /* ★ 告诉浏览器「这是深色界面」:下拉列表、滚动条、日期面板等原生控件
+     才会跟深色走。不写这行,select 弹出的是白底 + 我们设的浅色字 = 看不见。 */
+  color-scheme: dark;
+  /* ★ 指针换成科技感的青色箭头。url 后面那两个数字是**热区**(箭头尖在 3,2),
+     跟着图的宽高走 —— 改图不跟着改这里,就会「看着指这里、其实点那里」。
+     ★ PNG 放前面、SVG 放后面:Edge/Chromium 在 Windows 上对 SVG 当指针并不稳
+       (算出来的 cursor 值完全正确,画面上却还是系统箭头,一个错都不报 —— 踩过)。
+       最后一个 `default` 是最后的兜底,图全挂了也不会没有指针。 */
+  --cur: url("/static/cursor.png") 3 2, url("/static/cursor.svg") 3 2, default;
+  --curp: url("/static/cursor.png") 3 2, url("/static/cursor.svg") 3 2, pointer;
+}
+*{box-sizing:border-box}
+/* ★ 输入框还是用回系统光标(body 上那支箭头会被 input 继承下来,
+   在要打字的地方举着箭头很别扭)。auto = 交回浏览器按控件类型决定。 */
+input,textarea{cursor:auto}
+/* ★ 下拉框 UA 自己写了 cursor:default,不显式覆盖的话它永远举着系统箭头 */
+select{cursor:var(--curp)}
+/* ★ .bsec 的 display:flex 会盖过 UA 的 [hidden] —— 不写这行,隐藏的块会露出来 */
+[hidden]{display:none !important}
+html,body{height:100%;margin:0}
+body{
+  background:var(--bg); color:var(--fg);
+  font:12px/1.4 "Segoe UI","Microsoft YaHei",system-ui,sans-serif;
+  display:flex; flex-direction:column; overflow:hidden;
+  user-select:none;
+  cursor:var(--cur);
+}
+button,input,select{font:inherit;color:var(--fg)}
+/* ★ 这几条以前靠各处的单独样式,漏掉的地方(效果器页的下拉)就露出原生白底,
+   浅色字压在白底上 = 白板白字。统一在这里兜住。 */
+select,input[type=text],input[type=number],textarea{
+  background:#0d1017;border:1px solid var(--line);border-radius:4px;color:var(--fg);
+}
+select option,select optgroup{background:#12151d;color:var(--fg)}
+button{background:var(--bg3);border:1px solid var(--line);border-radius:5px;cursor:var(--curp)}
+button:hover{background:#222839;border-color:#33405a}
+button:active{transform:translateY(1px)}
+
+/* ---- 运输栏 ---- */
+#top{
+  flex:0 0 auto; display:flex; align-items:center; gap:8px;
+  padding:6px 10px; background:linear-gradient(#171b24,#11141b);
+  border-bottom:1px solid var(--line); height:46px;
+}
+#top .back{
+  color:var(--dim); text-decoration:none; font-size:18px; padding:0 4px;
+}
+#top .back:hover{color:var(--acc)}
+#top .tp{
+  width:38px;height:30px;font-size:13px;background:#1d2430;
+}
+#top .tp.on{background:var(--acc);color:#04121c;border-color:var(--acc)}
+#top .mini{padding:3px 8px;height:26px}
+#top .sep{width:1px;height:24px;background:var(--line);margin:0 2px}
+#top .chk,#top .fld{display:flex;align-items:center;gap:4px;color:var(--dim)}
+#top input[type=number]{
+  width:62px;background:#0d1017;border:1px solid var(--line);border-radius:4px;
+  padding:2px 5px;
+}
+#top select{background:#0d1017;border:1px solid var(--line);border-radius:4px;padding:2px 4px}
+#clock{
+  font:600 14px/1 "Consolas",monospace; letter-spacing:.5px;
+  color:#bff0ff; min-width:96px; text-align:center;
+  background:#0a0e15;border:1px solid var(--line);border-radius:4px;padding:6px 8px;
+}
+#saveState{color:var(--dim);font-size:11px;min-width:60px}
+#saveState.dirty{color:var(--warn)}
+
+/* ---- 主体三栏 ---- */
+main{flex:1 1 auto; display:flex; min-height:0}
+#browser{
+  flex:0 0 240px; display:flex; flex-direction:column;
+  background:var(--bg2); border-right:1px solid var(--line); min-height:0;
+}
+.bhead{display:flex;gap:4px;padding:6px}
+.bhead input{
+  flex:1;min-width:0;background:#0d1017;border:1px solid var(--line);
+  border-radius:4px;padding:4px 6px;
+}
+.bsec{display:flex;flex-direction:column;min-height:0;border-top:1px solid var(--line)}
+.btitle{
+  display:flex;align-items:center;gap:6px;padding:5px 8px;
+  color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.6px;
+}
+.btitle button{margin-left:auto}
+.btitle select.mini{
+  height:22px;padding:1px 3px;background:#0d1017;border:1px solid var(--line);
+  border-radius:4px;font-size:11px;text-transform:none;letter-spacing:0;
+}
+.btitle .asrchk{
+  display:flex;align-items:center;gap:3px;cursor:var(--curp);
+  text-transform:none;letter-spacing:0;white-space:nowrap;
+}
+.btitle .asrchk input{width:auto;margin:0;accent-color:#3b6a80}
+.btitle .asrchk.off{opacity:.45;cursor:not-allowed}
+#inspector .btitle{font-size:11px}
+.blist{overflow:auto;padding:0 4px 6px;min-height:40px}
+#recList{max-height:34vh}
+#mediaList{max-height:22vh}
+#blockList{max-height:26vh}
+.blist .it{
+  display:flex;align-items:center;gap:5px;padding:4px 6px;margin:1px 0;
+  border-radius:4px;cursor:grab;color:#c4ccd9;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;
+}
+.blist .it:hover{background:#1d2534}
+.blist .it.on{background:var(--sel);color:#eaf6ff}
+.blist .it .k{font-size:10px;color:var(--dim);margin-left:auto;flex:0 0 auto}
+.blist .it .dot{width:6px;height:6px;border-radius:50%;background:var(--acc);flex:0 0 auto}
+.blist .it.src-voice .dot{background:#7cc4ff}
+.blist .it.src-mix .dot{background:#ffb35c}
+.blist .empty{color:#4d5668;padding:6px;font-size:11px}
+.bnote{margin-top:auto;padding:8px;color:#4d5668;font-size:11px;line-height:1.6;border-top:1px solid var(--line)}
+
+/* ---- 播放列表 ---- */
+#playArea{flex:1 1 auto;position:relative;min-width:0;min-height:0;background:#0d1017}
+#playArea canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+#plOverlay{pointer-events:none}
+
+/* ---- 检查器 ---- */
+#inspector{
+  flex:0 0 232px;background:var(--bg2);border-left:1px solid var(--line);
+  display:flex;flex-direction:column;min-height:0;overflow:auto;
+}
+.inote{color:#5b657a;padding:10px;font-size:11px;line-height:1.7}
+.irow{display:flex;align-items:center;gap:6px;padding:3px 10px}
+.ivhint{padding:1px 10px 2px;font-size:10.5px;line-height:1.55;color:#6b778c}
+.irow label{flex:0 0 44px;color:var(--dim);font-size:11px}
+.irow input[type=number]{
+  width:64px;background:#0d1017;border:1px solid var(--line);
+  border-radius:4px;padding:2px 4px;
+}
+.irow input[type=range]{flex:1;min-width:0}
+.irow .v{font:11px/1 Consolas,monospace;color:#9fb3cc;min-width:38px;text-align:right}
+.itag{display:inline-block;padding:0 5px;border-radius:3px;background:#1d2637;color:#8fa7c4;font-size:10px}
+.itag.warn{background:#3a2d12;color:var(--warn)}
+.ibtns{display:flex;flex-wrap:wrap;gap:4px;padding:8px 10px}
+.ibtns button{flex:1 1 40%;padding:4px 6px;font-size:11px}
+
+/* ---- 底部面板 ---- */
+#bottom{
+  /* 236 时混音台差 11px,M/S 那行会被面板裁掉;250 刚好放得下整条 strip。 */
+  flex:0 0 250px;display:flex;flex-direction:column;min-height:90px;
+  background:var(--bg2);border-top:1px solid var(--line);
+}
+.tabs{display:flex;align-items:center;gap:2px;padding:3px 6px;border-bottom:1px solid var(--line)}
+.tabs button{
+  background:transparent;border:1px solid transparent;color:var(--dim);
+  padding:4px 12px;border-radius:4px 4px 0 0;
+}
+.tabs button.on{background:var(--bg3);color:var(--fg);border-color:var(--line);border-bottom-color:var(--bg3)}
+.tabs .grow{flex:1}
+.hint{color:#4d5668;font-size:11px;padding-right:6px}
+.panel{flex:1 1 auto;position:relative;min-height:0;overflow:hidden}
+.panel canvas{position:absolute;inset:0;width:100%;height:100%}
+.pnote{
+  position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+  color:#3f4757;font-size:12px;pointer-events:none;text-align:center;
+}
+#mixStrips{display:flex;gap:8px;padding:8px;overflow:auto;height:100%}
+.strip{
+  flex:0 0 78px;background:#161a23;border:1px solid var(--line);border-radius:6px;
+  padding:6px;display:flex;flex-direction:column;gap:3px;align-items:center;
+}
+/* ★ flex 默认会压缩:面板只有 236px 高时,轨名 / 声像那两行会被挤成 0 高——
+   页面不报错,只是名字没了。整块不许缩,让 fbody 去让位。
+   ★ 每行都定了高度,加起来要 ≤ 面板内容高(约 185px),否则最下面的 M/S 直接被裁掉;
+   gap 3px + fbody 最矮 60px 是算过的,别随手调大。 */
+.strip .nm{flex:0 0 auto;font-size:11px;color:#aab4c5;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.strip .nm.sub{flex:0 0 auto;font:10px/1 Consolas,monospace;color:#7b8598;display:flex;gap:4px;justify-content:center}
+/* 播放列表里双击轨名弹出的浮动输入框 */
+.trackNameEdit{
+  position:fixed;z-index:60;width:132px;height:20px;padding:0 4px;
+  font:600 12px "Segoe UI","Microsoft YaHei",sans-serif;
+  background:#0d1017;color:var(--fg);border:1px solid var(--acc);border-radius:4px;
+  box-shadow:0 4px 14px #0008;outline:none;
+}
+/* 双击轨名就地改名(混音台里面那个) */
+.strip .nm input.nmEdit{
+  width:100%;font:inherit;background:#0d1017;border:1px solid var(--acc);
+  border-radius:3px;padding:0 2px;color:var(--fg);text-align:center;
+}
+.strip .fbody{flex:1 1 auto;display:flex;gap:4px;align-items:stretch;min-height:60px;width:100%}
+.strip .fader{flex:1;writing-mode:vertical-lr;direction:rtl;width:14px;min-width:0}
+.strip canvas.meter{width:8px;flex:0 0 8px;background:#0a0d13;border-radius:2px}
+.strip .pan{flex:0 0 auto;width:100%;height:14px}
+.strip .fxs{flex:0 0 auto;width:100%;display:flex;flex-direction:column;gap:2px}
+.strip .fxs label{display:flex;align-items:center;gap:3px;font-size:9px;color:#7b8598}
+.strip .fxs input{flex:1;min-width:0;height:12px}
+.strip.master{border-color:var(--acc2)}
+.strip .ms{flex:0 0 auto;display:flex;gap:3px}
+.strip .ms button{width:22px;height:18px;font-size:10px;padding:0}
+.strip .ms button.on{background:var(--acc2);color:#1a0d04;border-color:var(--acc2)}
+.strip .ms button.solo.on{background:var(--warn);color:#221a04;border-color:var(--warn)}
+.strip .fxchips{flex:0 0 auto;width:100%;display:flex;flex-direction:column;gap:2px}
+.strip .chip{
+  display:flex;align-items:center;gap:3px;font-size:9px;line-height:1;
+  padding:2px 3px;border-radius:3px;background:#1d2331;border:1px solid var(--line);
+  color:#aab4c5;cursor:var(--curp);overflow:hidden;white-space:nowrap;text-overflow:ellipsis;
+}
+.strip .chip .dot{width:5px;height:5px;border-radius:50%;background:var(--acc);flex:0 0 5px}
+.strip .chip.off{opacity:.45}
+.strip .chip.off .dot{background:#4d5668}
+.strip .chip.plus{justify-content:center;color:#5b657a}
+
+/* 效果器面板 */
+#panelFx{overflow:auto}
+.fxwarn{
+  margin:6px 8px 0;padding:5px 8px;border:1px solid var(--warn);border-radius:4px;
+  background:#2a2008;color:var(--warn);font-size:11px;
+}
+.fxshell{display:flex;gap:10px;padding:8px;height:calc(100% - 4px);min-height:0}
+.fxside{flex:0 0 300px;display:flex;flex-direction:column;gap:6px;min-height:0}
+.fxhead{display:flex;align-items:baseline;gap:5px;font-size:11px;color:#7b8598}
+.fxhead b{color:var(--fg);font-size:12px}
+.fxslots{flex:1 1 auto;overflow:auto;display:flex;flex-direction:column;gap:3px;min-height:60px}
+.fxslot{
+  display:flex;align-items:center;gap:4px;padding:4px 5px;border-radius:4px;
+  background:#161a23;border:1px solid var(--line);cursor:var(--curp);font-size:11px;
+}
+.fxslot.sel{border-color:var(--acc)}
+.fxslot.bypass{opacity:.5}
+.fxslot .dot{width:8px;height:8px;border-radius:50%;flex:0 0 8px}
+.fxslot .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fxslot button{width:20px;height:18px;padding:0;font-size:10px;line-height:1}
+.fxslot .idx{font:10px/1 Consolas,monospace;color:#5b657a;width:14px;text-align:right}
+.fxaddrow{display:flex;gap:5px}
+.fxaddrow select{flex:1;min-width:0}
+.fxparams{
+  flex:1 1 auto;overflow:auto;border-left:1px solid var(--line);padding:2px 10px 10px;
+}
+.fxparams h4{margin:6px 0 2px;font-size:12px;color:var(--fg);font-weight:600}
+.fxparams .sub{font-size:11px;color:#7b8598;margin-bottom:8px}
+.fxparam{display:grid;grid-template-columns:88px 1fr 66px;gap:6px;align-items:center;margin:3px 0}
+.fxparam label{font-size:11px;color:#aab4c5}
+.fxparam output{font:10px/1 Consolas,monospace;color:#7b8598;text-align:right}
+.fxparam select{width:100%}
+.fxslot-empty{margin:6px 0;font-size:11px;color:#5b657a}
+
+/* 块内音高曲线 */
+#iCurve{
+  display:block;width:200px;height:122px;margin:4px 10px 2px;
+  border:1px solid var(--line);border-radius:4px;background:#0a0d13;
+  touch-action:none;cursor:crosshair;
+}
+
+/* 跑调提示 */
+.pmsg{padding:5px 8px;font-size:11px;color:#9fb3cc;border-top:1px solid var(--line);
+  cursor:var(--curp);user-select:none}
+.pmsg.bad{color:#ff8fa3;background:#2a1119}
+.pmsg.ok{color:#7b8598}
+.pmsg:hover{filter:brightness(1.25)}
+
+/* 工程下拉 */
+#projList{
+  flex:1 1 auto;min-width:0;background:#0d1017;border:1px solid var(--line);
+  border-radius:4px;padding:3px 4px;color:#c4ccd9;font-size:11px;
+}
+
+/* 右键菜单 */
+#ctx{
+  position:fixed;z-index:99;min-width:132px;padding:4px;display:none;
+  background:#161b25;border:1px solid #2c3547;border-radius:6px;
+  box-shadow:0 8px 26px #0009;
+}
+#ctx.on{display:block}
+#ctx .ci{
+  padding:5px 10px;border-radius:4px;color:#cdd6e3;cursor:var(--curp);
+  white-space:nowrap;display:flex;gap:10px;
+}
+#ctx .ci:hover{background:#26324a}
+#ctx .ci .k{margin-left:auto;color:#6b778c;font:10px/1.6 Consolas,monospace}
+#ctx .ci.dis{color:#4d5668;pointer-events:none}
+#ctx .sp{height:1px;background:#242a38;margin:4px 6px}
+
+/* 导出提示 */
+#toast{
+  position:fixed;right:14px;bottom:14px;z-index:120;max-width:420px;
+  padding:10px 14px;border-radius:8px;line-height:1.7;
+  background:#16202c;border:1px solid #2c4058;color:#cfe6ff;
+  box-shadow:0 10px 30px #000a;opacity:0;transform:translateY(8px);
+  transition:opacity .18s,transform .18s;pointer-events:none;
+}
+#toast.on{opacity:1;transform:none;pointer-events:auto}
+#toast a{color:#7fe0ff}
+#toast .dim{color:#6b778c;font-size:11px}
+
+/* 拖拽幽灵 */
+body.dragging-cursor{cursor:copy}
+::selection{background:var(--sel)}
+
+/* VST 面板(离线渲染) */
+#panelVst{display:flex;flex-direction:column;overflow:hidden}
+#panelVst .fxshell{flex:1 1 auto;height:auto;min-height:0;overflow:hidden}
+/* 面板默认只有一百多像素高;侧栏内容比它高时要能滚,而不是被切掉 */
+#panelVst .fxside{overflow:auto}
+#panelVst .fxslots{flex:0 0 auto;max-height:40vh}
+#vstAddSel{flex:1;min-width:0}
+/* ★ 别用 .pnote —— 它是「空面板居中提示」,position:absolute 会叠在一起 */
+.vstnote{font-size:10px;color:#5b657a;word-break:break-all;line-height:1.5;flex:0 0 auto}
+.vstnote code{font-size:10px}
+.vstdirline{
+  font-size:10px;color:#5b657a;line-height:1.4;flex:0 0 auto;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.vstdirline i{font-style:normal;margin:0 4px;color:#3f4757}
+#vstDirs b{color:#9fb3cc;font-weight:600}
+.vstbar{
+  flex:0 0 auto;display:flex;align-items:center;gap:7px;padding:5px 10px;
+  border-top:1px solid var(--line);font-size:11px;color:#aab4c5;flex-wrap:wrap;
+}
+.vstbar .sep{width:1px;height:16px;background:var(--line)}
+.vstbar button{padding:3px 8px;font-size:11px}
+.vstbar button.on{background:var(--acc2);color:#1a0d04;border-color:var(--acc2)}
+.vststate{font-size:11px}
+.vststate.ok{color:var(--ok)}
+.vststate.stale{color:var(--warn)}
+.vststate.error{color:#ff8fa3}
+/* 插件说明(中文):参数面板顶部那块「这是什么、怎么调」 */
+.vstguide{
+  margin:6px 0 10px;padding:7px 9px;border:1px solid #263049;border-radius:6px;
+  background:#121722;font-size:11px;line-height:1.65;color:#a9b6c9;
+}
+.vstguide .kind{color:#6ea8fe;font-weight:600}
+.vstguide ul{margin:5px 0 0 16px;padding:0}
+.vstguide li{margin:2px 0}
+.vstguide summary{cursor:var(--curp);color:#7ea6e0;margin-top:4px;outline:none}
+.vstguide summary:hover{color:#a8c6f0}
+.vstguide details[open] summary{margin-bottom:2px}
+/* 中文参数名比英文长,给标签列多留一点,别压到滑杆 */
+#vstParams .fxparam{grid-template-columns:118px 1fr 66px}
+/* 每根滑杆下面的那句「这是干嘛的」 */
+#vstParams .fxparam .phint{
+  grid-column:1/-1;font-size:10px;line-height:1.35;color:#6f7f95;
+  margin:-1px 0 5px 0;
+}
+#vstParams .fxparam.tech{opacity:.78}
+.vsttech{margin-top:10px;border-top:1px dashed var(--line);padding-top:6px}
+.vsttech summary{cursor:var(--curp);font-size:11px;color:#8fa0b6;outline:none}
+.vsttech summary:hover{color:#b8cee8}
+.strip .chip.vst{border-color:#2a3348}
+.strip .chip.vst.stale{border-color:#6b5320;color:var(--warn)}
+.strip .chip.vst.error{border-color:#5a2230;color:#ff8fa3}
+.vstparam-actions{margin-top:10px;display:flex;gap:6px}
+
+/* ---- 一键调音:浮在界面上的方案面板 ---- */
+.autopanel{
+  position:fixed; right:18px; top:64px; bottom:220px; width:min(560px,calc(100vw - 40px));
+  display:flex; flex-direction:column; z-index:60;
+  background:#0f131b; border:1px solid #2b3549; border-radius:10px;
+  box-shadow:0 18px 50px rgba(0,0,0,.6);
+}
+.autohead{
+  display:flex; align-items:center; gap:8px; padding:8px 10px;
+  border-bottom:1px solid var(--line); font-size:12px;
+}
+.autohead b{color:#ffd479}
+.automeas{
+  flex:0 0 auto; max-height:150px; overflow:auto; padding:6px 10px;
+  border-bottom:1px solid var(--line); font-size:11px; color:#aab8cc;
+}
+.automeas .mrow{display:flex; gap:8px; padding:2px 0}
+.automeas .mname{color:#dbe6f5; min-width:72px}
+.automeas .mtag{color:#7ea6e0}
+.automeas .mtag.vocal{color:#ffc857}
+.autobody{flex:1 1 auto; overflow:auto; padding:6px 10px}
+.autobody .agroup{margin:8px 0 2px;font-size:11px;color:#8fa0b6;border-bottom:1px dashed var(--line);padding-bottom:3px}
+.autobody .arow{
+  display:grid; grid-template-columns:18px 1fr; gap:6px;
+  padding:6px 0; border-bottom:1px solid #1a1f2a; font-size:11px; line-height:1.5;
+}
+.autobody .arow input{margin:2px 0 0 0}
+.autobody .atitle{color:#d8e2f0}
+.autobody .atitle .ai{color:#7fe0ff}
+.autobody .awhy{color:#7f8da1; font-size:10.5px}
+.autobody .abadge{
+  display:inline-block; padding:0 5px; border-radius:3px; margin-right:5px;
+  background:#1b2434; color:#8fb6e6; font-size:10px;
+}
+.autonotes{padding:4px 10px 6px; font-size:10.5px; color:#8c7a4f; max-height:88px; overflow:auto}
+.autonotes .n{color:#c7a95e}
+.autofoot{
+  display:flex; align-items:center; gap:6px; flex-wrap:wrap;
+  padding:8px 10px; border-top:1px solid var(--line);
+}
+.autofoot .grow{flex:1 1 auto}
+.autofoot .btn{background:var(--acc2); color:#1a0d04; border-color:var(--acc2); font-weight:600}
+.autofoot .btn:hover{filter:brightness(1.08)}
+.autofoot button:disabled{opacity:.45; cursor:var(--cur)}
+
+/* ---- 跟原唱矫正:选轨那一行 + 对照曲线 ---- */
+.refrow{
+  display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+  padding:6px 10px; border-bottom:1px solid var(--line); font-size:11px; color:#aab8cc;
+}
+.refrow label{display:flex; align-items:center; gap:5px}
+.refrow select{max-width:190px}
+.refrow input[type=range]{width:96px}
+#refStrengthV{color:#ffd479; min-width:32px; text-align:right}
+#refGraph{
+  display:block; flex:0 0 auto; width:100%; height:110px;
+  background:#0b0e14; border-bottom:1px solid var(--line);
+}
+#refPlain{color:#8c98aa}
+.refbody .arow{cursor:var(--cur)}
+
+/* ---------------------------------------------------------------- 整页块编辑 */
+/* 他要的是一条轨的所有块铺满一页(不是左栏一个个小芯片)。 */
+#bigEdit{
+  position:fixed; inset:0; z-index:70; display:flex; flex-direction:column;
+  background:#0a0d13;
+}
+#bigEdit[hidden]{display:none}
+#bigHead{
+  display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+  padding:6px 10px; background:#10151e; border-bottom:1px solid var(--line);
+  flex:0 0 auto;
+}
+#bigHead b{color:#eaf4ff; font-size:13px; margin-right:2px}
+#bigHead .grow{flex:1}
+#bigHead .inote{font-size:11px; color:#8c98aa}
+/* 块 / 音高 分段 */
+#bigHead .seg{display:inline-flex; border:1px solid var(--line); border-radius:6px; overflow:hidden}
+#bigHead .seg button{border:0; border-radius:0; margin:0; height:24px; padding:0 9px}
+#bigHead .seg button + button{border-left:1px solid var(--line)}
+#bigHead .seg button.on{background:#1d3a4d; color:#7fe0ff}
+#bigHead .mini.on{background:#1d3a4d; border-color:#3b6a80; color:#7fe0ff}
+/* 原唱条 */
+#bigRefBar{
+  display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+  padding:5px 10px; background:#0d131c; border-bottom:1px solid var(--line);
+  flex:0 0 auto; font-size:12px; color:#aab6c6;
+}
+#bigRefBar[hidden]{display:none}
+#bigRefBar label{display:inline-flex; align-items:center; gap:5px}
+#bigRefBar select{max-width:190px}
+#bigRefBar input[type=range]{width:110px; vertical-align:middle}
+#bigRefBar .chk{display:inline-flex; align-items:center; gap:4px}
+#bigRefState{font-size:11px; color:#8c98aa}
+#bigRefState.warn{color:#ffc857}
+#bigRefState.ok{color:#4fd1c5}
+#bigCanvas{
+  flex:1 1 auto; display:block; width:100%; height:100%; min-height:0;
+  touch-action:none; cursor:var(--cur);
+}
+button.danger{color:#ff8fa3}
+button.danger:hover{background:#2a1b22; border-color:#ff8fa3}

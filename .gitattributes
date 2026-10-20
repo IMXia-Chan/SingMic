@@ -1,0 +1,8 @@
+# ★ .bat 必须原样保留 CRLF —— core.autocrlf 会把它改成 LF,批次文件就坏了
+*.bat -text
+
+# 二进制
+*.onnx binary
+*.npz binary
+*.png binary
+*.wav binary

@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<!--
+  手机端 —— 打开就是麦克风。
+
+  ★ 这里必须把浏览器自带的 AEC / 降噪 / 自动增益全关掉:
+    它们是给「打电话」设计的,会把唱歌的动态压扁、把气声当成噪声削掉。
+    关掉之后拿到的才是手机麦克风的原始声音,降噪我们自己在那头做。
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#0f1115">
+<title>SingMic · 手机麦克风</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 18px; padding: 24px;
+    background: #0f1115; color: #e8ecf1; font-family: system-ui, -apple-system, sans-serif;
+    -webkit-user-select: none; user-select: none;
+  }
+  h1 { font-size: 20px; font-weight: 600; letter-spacing: .08em; margin: 0; opacity: .9; }
+  #state { font-size: 15px; color: #8b95a5; min-height: 22px; }
+  #state.ok { color: #4ade80; }
+  #state.err { color: #f87171; }
+  #meterBox {
+    width: min(86vw, 380px); height: 26px; border-radius: 13px;
+    background: #1a1f27; overflow: hidden; position: relative;
+  }
+  #meter {
+    height: 100%; width: 0%; border-radius: 13px;
+    background: linear-gradient(90deg, #22d3ee, #4ade80 60%, #fbbf24 85%, #f87171);
+    transition: width 60ms linear;
+  }
+  #peak {
+    position: absolute; top: 0; bottom: 0; width: 2px; background: #fff;
+    opacity: .75; left: 0; transition: left 120ms ease-out;
+  }
+  button {
+    font: inherit; font-size: 17px; font-weight: 600; padding: 16px 40px;
+    border: 0; border-radius: 999px; color: #06121a; background: #22d3ee;
+    box-shadow: 0 8px 24px rgba(34,211,238,.25);
+  }
+  button.stop { background: #f87171; color: #230808; box-shadow: 0 8px 24px rgba(248,113,113,.25); }
+  button:disabled { opacity: .5; }
+  #micRow { display: none; align-items: center; gap: 10px; font-size: 14px; color: #8b95a5; }
+  #micSel {
+    font: inherit; font-size: 14px; max-width: 62vw; padding: 8px 12px;
+    border-radius: 10px; border: 1px solid #2a313c; background: #1a1f27; color: #e8ecf1;
+  }
+  .hint { font-size: 13px; line-height: 1.7; color: #6b7686; text-align: center; max-width: 340px; margin: 0; }
+  .db { font-variant-numeric: tabular-nums; font-size: 13px; color: #8b95a5; }
+</style>
+</head>
+<body>
+  <h1>SINGMIC</h1>
+  <div id="state">没在采音</div>
+
+  <div id="meterBox"><div id="meter"></div><div id="peak"></div></div>
+  <div class="db" id="db">—</div>
+
+  <button id="btn">开始</button>
+
+  <!-- ★ 安卓机常常不止一支麦克风(底部/顶部),浏览器默认选哪支我们管不了。
+       选错了会明显发闷、像电话 —— 这里可以自己换一支试试。 -->
+  <label id="micRow"><span>麦克风</span><select id="micSel"></select></label>
+
+  <p class="hint">
+    点亮以后别锁屏 —— 安卓一锁屏就会把页面挂起。<br>
+    声音走 USB 传到电脑,电脑那头负责降噪、调音和录音。
+  </p>
+
+<script>
+"use strict";
+
+const btn = document.getElementById('btn');
+const stateEl = document.getElementById('state');
+const meterEl = document.getElementById('meter');
+const peakEl = document.getElementById('peak');
+const dbEl = document.getElementById('db');
+
+let ws = null, ctx = null, stream = null, node = null, wakeLock = null;
+let running = false;
+let peakHold = 0, peakUntil = 0;
+// ★ 记住上次选的那支麦。换手机/换浏览器的 deviceId 会变,所以只当提示用。
+let micId = '';
+try { micId = localStorage.getItem('singmicMic') || ''; } catch (e) {}
+
+// ★ 必须在 AudioWorklet 里取原始采样。ScriptProcessor 早就废了,
+//   而且它的块大小和线程模型都会把延迟拖到几百毫秒。
+const WORKLET = `
+class Cap extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    // ★ 5ms @ 48k。以前是 960(20ms)—— 每包多等 10ms,耳返就多 10ms 延迟,
+    //   而 USB 传 5ms 一包毫无压力。这一条是延迟账里最便宜的一刀。
+    this.buf = new Float32Array(240);
+    this.n = 0;
+  }
+  process(inputs) {
+    const ch = inputs[0] && inputs[0][0];
+    if (!ch) return true;
+    for (let i = 0; i < ch.length; i++) {
+      this.buf[this.n++] = ch[i];
+      if (this.n >= this.buf.length) {
+        this.port.postMessage(this.buf.slice(0));
+        this.n = 0;
+      }
+    }
+    return true;
+  }
+}
+registerProcessor('cap', Cap);
+`;
+
+function setState(text, cls) {
+  stateEl.textContent = text;
+  stateEl.className = cls || '';
+}
+
+// ★ 发 float32,不再转 int16。
+//   int16 一过就直接截到 16bit —— 源头就丢了,后面再怎么算都补不回来。
+//   手机 USB 传 192KB/s 毫无压力。
+function toF32(f) {
+  return f.buffer.slice(f.byteOffset, f.byteOffset + f.byteLength);
+}
+
+function drawMeter(f) {
+  let sum = 0, pk = 0;
+  for (let i = 0; i < f.length; i++) {
+    const v = f[i];
+    sum += v * v;
+    const a = v < 0 ? -v : v;
+    if (a > pk) pk = a;
+  }
+  const rms = Math.sqrt(sum / f.length);
+  // -60dB..0dB 映射到 0..100%
+  const db = 20 * Math.log10(rms + 1e-9);
+  const pct = Math.max(0, Math.min(100, (db + 60) / 60 * 100));
+  meterEl.style.width = pct + '%';
+  dbEl.textContent = db.toFixed(1) + ' dB';
+
+  const now = performance.now();
+  if (pk > peakHold) { peakHold = pk; peakUntil = now + 900; }
+  else if (now > peakUntil) peakHold *= 0.94;
+  const pdb = 20 * Math.log10(peakHold + 1e-9);
+  const ppct = Math.max(0, Math.min(100, (pdb + 60) / 60 * 100));
+  peakEl.style.left = ppct + '%';
+}
+
+// ---- 连接:断了要自己重连,不许静悄悄地永远不发声音 ----
+function openWs() {
+  return new Promise((res, rej) => {
+    const url = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws/mic';
+    const s = new WebSocket(url);
+    s.binaryType = 'arraybuffer';
+    s.onopen = () => res(s);
+    s.onerror = () => rej(new Error('连不上电脑那头的服务'));
+  });
+}
+
+function attach(s) {
+  s.onclose = () => {
+    if (!running) return;
+    ws = null;
+    setState('连接断了,正在重连…', 'err');
+    setTimeout(retry, 1500);
+  };
+  ws = s;
+  // ★ 把「浏览器实际给了什么」报上去 —— 这三项我们要求关掉,但浏览器有权
+  //   不理你。以前只能靠频谱反推,现在它自己说。
+  let cap = {};
+  try {
+    const tr = stream && stream.getAudioTracks && stream.getAudioTracks()[0];
+    const st = tr && tr.getSettings ? tr.getSettings() : {};
+    cap = {
+      rate: st.sampleRate ?? null,
+      ch: st.channelCount ?? null,
+      ec: st.echoCancellation ?? null,
+      ns: st.noiseSuppression ?? null,
+      agc: st.autoGainControl ?? null,
+      label: (tr && tr.label) ? String(tr.label).slice(0, 60) : ''
+    };
+  } catch (e) { /* 报不上来不影响采音 */ }
+  ws.send(JSON.stringify({ type: 'hello', rate: ctx.sampleRate, fmt: 'f32', cap }));
+}
+
+async function retry() {
+  if (!running) return;
+  try {
+    attach(await openWs());
+    setState('正在采音 · ' + ctx.sampleRate + ' Hz', 'ok');
+  } catch (e) {
+    setTimeout(retry, 1500);
+  }
+}
+
+async function start() {
+  btn.disabled = true;
+  setState('正在打开麦克风…');
+  try {
+    // ★ 先连后台:连不上就别费劲开麦克风了。
+    // ★★ 但**不许一次连不上就判死刑**:电脑那边 adb reverse 是随 USB 连接走的,
+    //   拔插一下手机就没了,电脑那边会在 10 秒内自己接回来。
+    //   以前这里一次失败就报「连不上电脑那头的服务」,得再点一次才开始。
+    let s0;
+    for (let i = 0; ; i++) {
+      try {
+        s0 = await openWs();
+        break;
+      } catch (e) {
+        if (i >= 14) throw e;
+        setState(`连不上电脑,正在重试(${i + 1}/15)…`, 'err');
+        await new Promise(r => setTimeout(r, 1000));
+      }
+    }
+
+    ctx = new (window.AudioContext || window.webkitAudioContext)({
+      sampleRate: 48000, latencyHint: 'interactive'
+    });
+
+    const base = {
+      // ★ 这三项必须为 false —— 否则手机在偷偷处理你的声音
+      echoCancellation: false,
+      noiseSuppression: false,
+      autoGainControl: false,
+      channelCount: 1,
+      sampleRate: 48000
+    };
+    // ★ 指定过麦克风就用 exact;但 deviceId 可能已经失效(换浏览器/重装),
+    //   那一下会抛 OverconstrainedError —— 退回系统默认,不许因此开不了麦。
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: micId ? { ...base, deviceId: { exact: micId } } : base
+      });
+    } catch (e) {
+      if (!micId) throw e;
+      micId = '';
+      try { localStorage.removeItem('singmicMic'); } catch (_) {}
+      stream = await navigator.mediaDevices.getUserMedia({ audio: base });
+    }
+
+    await ctx.resume();
+    refreshMics();
+
+    const blob = new Blob([WORKLET], { type: 'application/javascript' });
+    const modUrl = URL.createObjectURL(blob);
+    await ctx.audioWorklet.addModule(modUrl);
+    URL.revokeObjectURL(modUrl);
+
+    const src = ctx.createMediaStreamSource(stream);
+    node = new AudioWorkletNode(ctx, 'cap', {
+      numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1]
+    });
+
+    // ★ 电平表每 5 包才画一次(=25Hz)。
+    //   以前每包(200Hz)都改一次 DOM,主线程一忙就把发声音的包攒起来,
+    //   电脑那头的抖动缓冲被逼着往上爬 —— 耳返越唱越拖,原因在这儿。
+    let meterTick = 0;
+    node.port.onmessage = (e) => {
+      const f = e.data;
+      if (ws && ws.readyState === WebSocket.OPEN) ws.send(toF32(f));
+      if ((meterTick = (meterTick + 1) & 3) === 0) drawMeter(f);
+    };
+
+    src.connect(node);
+    // ★ 接一下 destination(它输出的是静音)。不接的话某些内核根本不会跑这个图。
+    node.connect(ctx.destination);
+
+    // 不让屏幕睡着 —— 锁屏 = 页面被挂起 = 声音断
+    try {
+      if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen');
+    } catch (e) { /* 拿不到就算了,不影响采音 */ }
+
+    running = true;
+    attach(s0);              // ★ 先立 running 再挂连接,否则断线回调会以为已经停了
+    btn.textContent = '停止';
+    btn.classList.add('stop');
+    btn.disabled = false;
+    setState('正在采音 · ' + ctx.sampleRate + ' Hz', 'ok');
+  } catch (e) {
+    setState('★ ' + (e && e.message ? e.message : e), 'err');
+    cleanup();
+    btn.disabled = false;
+  }
+}
+
+function cleanup() {
+  running = false;
+  try { if (node) node.disconnect(); } catch (e) {}
+  try { if (stream) stream.getTracks().forEach(t => t.stop()); } catch (e) {}
+  try { if (ctx) ctx.close(); } catch (e) {}
+  try { if (ws) ws.close(); } catch (e) {}
+  try { if (wakeLock) wakeLock.release(); } catch (e) {}
+  node = null; stream = null; ctx = null; ws = null; wakeLock = null;
+  meterEl.style.width = '0%';
+  peakEl.style.left = '0%';
+  dbEl.textContent = '—';
+}
+
+function stop() {
+  cleanup();
+  btn.textContent = '开始';
+  btn.classList.remove('stop');
+  setState('没在采音');
+}
+
+// ★ 采集权限拿到之后才能看到麦克风的名字(之前是空的),所以放在 start() 里调。
+async function refreshMics() {
+  try {
+    const devs = await navigator.mediaDevices.enumerateDevices();
+    const ins = devs.filter(d => d.kind === 'audioinput');
+    const sel = document.getElementById('micSel');
+    if (!ins.length) { document.getElementById('micRow').style.display = 'none'; return; }
+    sel.innerHTML = '';
+    ins.forEach((d, i) => {
+      const o = document.createElement('option');
+      o.value = d.deviceId;
+      o.textContent = d.label || ('麦克风 ' + (i + 1));
+      sel.appendChild(o);
+    });
+    // 当前真正在用的那支
+    let cur = '';
+    try { cur = stream.getAudioTracks()[0].getSettings().deviceId || ''; } catch (e) {}
+    micId = cur || micId;
+    if (micId && ins.some(d => d.deviceId === micId)) sel.value = micId;
+    document.getElementById('micRow').style.display = ins.length > 1 ? 'flex' : 'none';
+  } catch (e) { /* 枚举不了就不显示,不影响采音 */ }
+}
+
+document.getElementById('micSel').addEventListener('change', e => {
+  micId = e.target.value;
+  try { localStorage.setItem('singmicMic', micId); } catch (_) {}
+  if (running) {           // 换一支麦 = 重开一次采集(点头选也算用户手势)
+    setState('正在换麦克风…');
+    cleanup();
+    start();
+  }
+});
+
+btn.addEventListener('click', () => { running ? stop() : start(); });
+
+// 屏幕锁了再解锁,wake lock 会失效 —— 回来时重新申请
+document.addEventListener('visibilitychange', async () => {
+  if (document.visibilityState === 'visible' && running && 'wakeLock' in navigator) {
+    try { wakeLock = await navigator.wakeLock.request('screen'); } catch (e) {}
+  }
+});
+
+window.addEventListener('pagehide', cleanup);
+</script>
+</body>
+</html>

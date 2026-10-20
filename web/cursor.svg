@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="21" height="29" viewBox="0 0 26 36">
+  <!-- 科技感指针。热区(箭头尖)在 (4,2),显示尺寸 21×29 ⇒ CSS 里写 url(...) 3 2。
+       ★ 改了 width/height 就要重算那两个数字,否则点击位置和眼睛看到的错开。 -->
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2=".6" y2="1">
+      <stop offset="0" stop-color="#eafcff"/>
+      <stop offset=".45" stop-color="#7ff0ff"/>
+      <stop offset="1" stop-color="#23b6e6"/>
+    </linearGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="1.2"/>
+    </filter>
+  </defs>
+  <path d="M4 2 L4 27 L10.6 21 L14.6 32 L18.9 30.3 L15 19.6 L23 19.6 Z"
+        fill="#23b6e6" opacity=".5" filter="url(#glow)"/>
+  <path d="M4 2 L4 27 L10.6 21 L14.6 32 L18.9 30.3 L15 19.6 L23 19.6 Z"
+        fill="url(#g)" stroke="#0b2a3a" stroke-width="1.1" stroke-linejoin="round"/>
+  <path d="M4.9 4.6 L4.9 22.4" stroke="#ffffff" stroke-width="1" opacity=".55"/>
+</svg>

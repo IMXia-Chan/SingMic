@@ -1,0 +1,1207 @@
+<!DOCTYPE html>
+<!--
+  电脑端控制台。
+
+  ★ 所有参数都是「发一条消息给后台」,不在前台做任何音频处理 ——
+    声音只在后台那一个地方流,前台只是旋钮。
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0f1115">
+<!-- 空图标:否则浏览器每次开页都去要 /favicon.ico,控制台刷一条 404 -->
+<link rel="icon" href="data:,">
+<title>SingMic</title>
+<!-- 自己画的霓虹指针:全局一个,十字/抓手/输入框那些也一并盖掉 -->
+<script src="/static/pointer.js?v=6" defer></script>
+<style>
+  /* ★ 青色指针。url 后面那两个数字是热区(箭头尖),跟着图的宽高走。
+     PNG 优先、SVG 兜底:Windows 上 Edge 用 SVG 当指针不一定生效(不报错,就是不变)。
+     最后那个 default/pointer 是最后的兜底。 */
+  :root { color-scheme: dark;
+          --cur: url("/static/cursor.png") 3 2, url("/static/cursor.svg") 3 2, default;
+          --curp: url("/static/cursor.png") 3 2, url("/static/cursor.svg") 3 2, pointer; }
+  * { box-sizing: border-box; }
+  /* 要打字的地方交回系统光标,别举着箭头;下拉框 UA 自己写了 default,要显式盖掉 */
+  input, textarea { cursor: auto; }
+  select { cursor: var(--curp); }
+  body {
+    margin: 0; min-height: 100vh; padding: 20px 24px 40px;
+    background: #0f1115; color: #e8ecf1;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    cursor: var(--cur);
+  }
+  header { display: flex; align-items: baseline; gap: 14px; margin-bottom: 18px; }
+  h1 { font-size: 19px; letter-spacing: .12em; margin: 0; font-weight: 700; }
+  .pill { font-size: 12px; padding: 3px 10px; border-radius: 999px; background: #1a1f27; color: #8b95a5; }
+  .pill.ok { background: #052e1c; color: #4ade80; }
+  .pill.rec { background: #3b0a0a; color: #f87171; }
+  .studioLink {
+    margin-left: auto; font-size: 13px; font-weight: 600; text-decoration: none;
+    color: #7fe0ff; padding: 4px 12px; border: 1px solid #1d4c63;
+    border-radius: 999px; background: #0a1a24; align-self: center;
+  }
+  .studioLink:hover { background: #0f2a3a; border-color: #2e7fa3; }
+
+  .wrap { display: grid; grid-template-columns: minmax(300px, 1fr) minmax(320px, 420px); gap: 20px; }
+  @media (max-width: 860px) { .wrap { grid-template-columns: 1fr; } }
+
+  .card { background: #151a21; border: 1px solid #1f2732; border-radius: 14px; padding: 16px 18px; }
+  .card h2 { font-size: 13px; font-weight: 600; letter-spacing: .08em; color: #8b95a5;
+             margin: 0 0 14px; text-transform: uppercase; }
+
+  .meter { height: 22px; border-radius: 11px; background: #1a1f27; overflow: hidden; position: relative; }
+  .meter .bar { height: 100%; width: 0%;
+    background: linear-gradient(90deg,#22d3ee,#4ade80 60%,#fbbf24 85%,#f87171); }
+  .meter .pk { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; opacity: .7; left: 0; }
+  .row { display: flex; align-items: center; gap: 10px; margin: 10px 0; }
+  .row label { flex: 0 0 92px; font-size: 13px; color: #9aa4b2; }
+  .row input[type=range] { flex: 1; accent-color: #22d3ee; }
+  .row .val { flex: 0 0 58px; text-align: right; font-size: 12px;
+              color: #cbd5e1; font-variant-numeric: tabular-nums; }
+  select, button {
+    font: inherit; font-size: 13px; background: #1a1f27; color: #e8ecf1;
+    border: 1px solid #2a3442; border-radius: 9px; padding: 8px 10px;
+  }
+  button { cursor: var(--curp); }
+  button.primary { background: #22d3ee; color: #06121a; border: 0; font-weight: 700; }
+  button.rec { background: #f87171; color: #230808; border: 0; font-weight: 700; }
+  button:disabled { opacity: .45; cursor: var(--cur); }
+  .btns { display: flex; gap: 10px; margin-top: 14px; }
+  .btns button { flex: 1; padding: 11px; }
+  .full { width: 100%; }
+
+  .chk { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #9aa4b2; margin: 8px 0 4px; }
+  .chk input { accent-color: #22d3ee; width: 15px; height: 15px; }
+
+  #notes { margin-top: 16px; display: flex; flex-direction: column; gap: 8px; }
+  .note { font-size: 13px; padding: 9px 12px; border-radius: 10px;
+          background: #16202c; color: #a9b6c8; border-left: 3px solid #22d3ee; }
+  .note.warn { border-left-color: #f87171; color: #fca5a5; }
+  .hint { font-size: 12px; color: #5d6878; line-height: 1.7; margin: 12px 0 0; }
+  .reclist { display: flex; flex-direction: column; gap: 6px; max-height: 232px; overflow: auto; }
+  .recrow { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #cbd5e1; }
+  .recname { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+             font-variant-numeric: tabular-nums; }
+  .recmeta { color: #5d6878; white-space: nowrap; }
+  a.dl { font-size: 12px; color: #22d3ee; text-decoration: none;
+         border: 1px solid #2a3442; border-radius: 7px; padding: 2px 8px; white-space: nowrap; }
+  a.dl:hover { background: #1a1f27; }
+  button.del { font-size: 12px; padding: 2px 8px; background: transparent;
+               color: #6b7686; border: 1px solid #2a3442; border-radius: 7px; }
+  button.del:hover { color: #f87171; border-color: #7f1d1d; background: #2a0d0d; }
+  button.danger { background: #2a0d0d; color: #f87171; border: 1px solid #7f1d1d; }
+  .num { font-variant-numeric: tabular-nums; }
+
+  /* ---- 音符块编辑器 ---- */
+  .edwrap { margin-top: 10px; border: 1px solid #1f2732; border-radius: 10px;
+            overflow: hidden; background: #0b0e13; }
+  #edCanvas { display: block; width: 100%; height: 240px; touch-action: none;
+              cursor: var(--cur); }
+  .edbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+  .edbar button { padding: 8px 12px; }
+  .edbar .chk { margin: 0; }
+  #edDl[hidden] { display: none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>SINGMIC</h1>
+  <span class="pill" id="pPhone">手机没连</span>
+  <span class="pill" id="pRec" hidden>录音中</span>
+  <span class="pill" id="pUnder" hidden>欠载</span>
+  <a class="studioLink" href="/studio" title="多轨工作台:摆块、加伴奏、编和声">工作室 →</a>
+</header>
+
+<div class="wrap">
+  <div>
+    <div class="card">
+      <h2>电平</h2>
+      <div class="meter"><div class="bar" id="bar"></div><div class="pk" id="pk"></div></div>
+      <div class="hint" id="levels">—</div>
+      <div class="btns">
+        <button class="primary" id="btnRec">开始录音</button>
+      </div>
+      <div class="hint" id="recInfo"></div>
+    </div>
+
+    <div class="card" style="margin-top:16px">
+      <h2>录音 / 导出</h2>
+      <div class="reclist" id="recList"><div class="hint">还没有录音</div></div>
+      <div class="btns">
+        <button class="primary" id="btnPip">悬浮窗</button>
+        <button id="btnOpenRec">打开文件夹</button>
+        <button id="btnRefreshRec">刷新</button>
+        <button class="danger" id="btnClearRec">全删</button>
+      </div>
+      <p class="hint"><b>切到音乐软件去放歌时,点「悬浮窗」</b> —— 开出来的小窗口一直浮在别的程序上面,
+        里面只有电平、计时和一个开始/停止按钮,不用切回浏览器。</p>
+      <p class="hint">每录一次两个文件:<b>_mix</b> 成品、<b>_voice</b> 干声(只有你,没有伴奏)。
+        原文件是 <b>32bit float WAV</b>(无损,但有些播放器不认);
+        点 <b>MP3</b> 转一份通用的再下(手机、微信、K歌 App 都认)。</p>
+    </div>
+
+    <div class="card" style="margin-top:16px">
+      <h2>输出 / 伴奏</h2>
+      <div class="row"><label>耳返设备</label>
+        <select id="devSel" class="full"></select>
+      </div>
+      <div class="row"><label>麦克风音量</label>
+        <input type="range" id="sGain" min="0" max="400" value="100"><span class="val" id="vGain">1.00×</span>
+      </div>
+      <div class="row"><label>伴奏来源</label>
+        <select id="loopSel" class="full"></select>
+      </div>
+      <p class="hint"><b>只是想让耳机里既有伴奏又有你 → 这里保持「不放伴奏」就行。</b>
+        音乐照常从耳机出,耳返只往耳机里补你的人声,两路在耳机里自然叠在一起;
+        不抓取就没有啸叫风险,也不用改任何系统设置。<br>
+        ★ 这里的选项只在<b>要把伴奏录进文件</b>时才需要 —— 那时音乐得先从另一块声卡出
+        (见下面的说明),我们再去抓那块。</p>
+      <div class="row"><label>伴奏音量</label>
+        <input type="range" id="sBacking" min="0" max="150" value="70"><span class="val" id="vBacking">70%</span>
+      </div>
+      <div class="row"><label>耳返音量</label>
+        <input type="range" id="sMonitor" min="0" max="150" value="100"><span class="val" id="vMonitor">100%</span>
+      </div>
+      <label class="chk"><input type="checkbox" id="cMonPre"> 耳返绕开 AI(省 60ms;录音文件不受影响)</label>
+      <div class="row"><label>耳返降噪</label>
+        <input type="range" id="sMonDn" min="0" max="100" value="65"><span class="val" id="vMonDn">65%</span>
+      </div>
+      <label class="chk"><input type="checkbox" id="cLowLat"> 低延迟模式(抖动缓冲锁 30ms;手机卡一下会「咔」一小声)</label>
+      <div class="hint" id="latHint">现在这两项都关着:耳返比嘴晚约 150ms。</div>
+      <p class="hint">伴奏只有<b>电脑</b>这一种来源(手机上的音乐抓不到:网页只能拿麦克风)。
+        抓回来的伴奏<b>不做任何加工</b>,只有一个音量。<br>
+        ★ 抓不了耳返设备自己的声音(会啸叫)—— 所以要让音乐从另一块声卡出,
+        比如把播放器的输出设成 <b>CABLE Input</b>,这里也选 <b>CABLE Input</b>。</p>
+      <p class="hint">想让别的软件把这里当麦克风:耳返设备选 <b>CABLE Input</b>。</p>
+    </div>
+  </div>
+
+  <div>
+    <div class="card">
+      <h2>调音</h2>
+
+      <!-- ★ 直通对照:跳过整条链,只保留麦克风音量。调音时最有用的一件东西 ——
+             听不出前后差别,就说明当前这个滑杆在空转。 -->
+      <label class="chk"><input type="checkbox" id="cBypass"> 直通(听处理前的原声,做 A/B 对照)</label>
+      <div class="hint" id="capHint">手机还没报采集参数(页面连上后会自动显示)。</div>
+
+      <div class="row"><label>降噪</label>
+        <!-- ★ 默认 0:实测底噪 -79dBFS(SNR 62dB),不需要降噪;
+             开着 35% 会把气声和字尾削掉(实测最差 5% 的帧 -24.8dB)。 -->
+        <input type="range" id="sDenoise" min="0" max="100" value="0"><span class="val" id="vDenoise">0%</span>
+      </div>
+      <label class="chk"><input type="checkbox" id="cAI"> AI 降噪(DeepFilterNet3,停顿压 30~47dB,整体 +60ms)</label>
+      <div class="hint" id="aiHint">打开后这一级放在 EQ 前面;只支持 48000Hz。加载要 1 秒左右。</div>
+
+      <!-- ★ 默认不勾:门限 -55dB 会把轻音整段关掉,和「保真」冲突。 -->
+      <label class="chk"><input type="checkbox" id="cGate"> 噪声门(不唱时闭嘴麦克风)</label>
+      <div class="row" id="rowGate"><label>门限</label>
+        <input type="range" id="sGate" min="-80" max="-20" value="-55"><span class="val" id="vGate">-55 dB</span>
+      </div>
+
+      <!-- ★ 高通拐点。专业人声链在 80~120Hz 之间按嗓音挑:
+             男低音 80~90,女声/轻唱 100~120。开太低会留下隆隆声,
+             开太高会把声音削薄。 -->
+      <div class="row"><label>高通</label>
+        <input type="range" id="sHP" min="20" max="200" value="80" step="5"><span class="val" id="vHP">80 Hz</span>
+      </div>
+
+      <div class="row"><label>低音</label>
+        <input type="range" id="sLow" min="-15" max="15" value="0" step="0.5"><span class="val" id="vLow">0 dB</span>
+      </div>
+      <div class="row"><label>中音</label>
+        <input type="range" id="sMid" min="-15" max="15" value="0" step="0.5"><span class="val" id="vMid">0 dB</span>
+      </div>
+      <div class="row"><label>高音</label>
+        <input type="range" id="sHigh" min="-15" max="15" value="0" step="0.5"><span class="val" id="vHigh">0 dB</span>
+      </div>
+
+      <!-- ★ 齿音抑制。补高音之后 s / sh / 齿音会跟着一起亮 —— 这不是补错了,
+            是高频本来就在同一段;专业做法是补完再把那一瞬压回去。
+            默认 0:不补高音就不需要。推高音推到刺了,再往右拉。 -->
+      <div class="row"><label>齿音</label>
+        <input type="range" id="sDeess" min="0" max="100" value="0"><span class="val" id="vDeess">0%</span>
+      </div>
+
+      <!-- ★ 默认不勾:压缩会把「轻的地方」和「响的地方」拉到一起,要保真。 -->
+      <label class="chk"><input type="checkbox" id="cComp"> 压缩(把忽大忽小收一收)</label>
+      <div class="row" id="rowRatio"><label>压缩比</label>
+        <input type="range" id="sRatio" min="1" max="10" value="3" step="0.5"><span class="val" id="vRatio">3:1</span>
+      </div>
+      <div class="row" id="rowThr"><label>压缩门限</label>
+        <input type="range" id="sThr" min="-50" max="0" value="-22" step="1"><span class="val" id="vThr">-22 dB</span>
+      </div>
+      <div class="row"><label>混响</label>
+        <input type="range" id="sReverb" min="0" max="100" value="15"><span class="val" id="vReverb">15%</span>
+      </div>
+
+      <!-- ★ 滑杆只改「正在跑的这一份」;重启服务会回到 config.toml 里的旧值。
+             按一下这个按钮才真正存住(只改 [voice] 那几行,注释不丢)。 -->
+      <div class="btns" style="margin-top:12px">
+        <button class="primary" id="btnSavePreset">保存这套参数</button>
+      </div>
+      <p class="hint" id="saveHint">调好之后按一下,重启服务也还是这套。</p>
+    </div>
+
+    <div id="notes"></div>
+  </div>
+</div>
+
+<!-- ★ 音符块编辑器:Melodyne 那种「一块一块」的,不是一键自动修。
+     时间轴**不联动** —— 删掉留空、拖长只吃紧邻的下一块,后面的位置不动,
+     所以成品永远和伴奏对得上。 -->
+<div class="card" id="edCard" style="margin-top:16px">
+  <h2>音符块</h2>
+  <div class="row" style="margin-top:0">
+    <label>干声</label>
+    <select id="edRec" class="full"></select>
+    <button class="primary" id="edLoad">切成块</button>
+  </div>
+  <div class="hint" id="edInfo">选一条录音 → 切成块 → 拖。</div>
+
+  <div class="edwrap"><canvas id="edCanvas"></canvas></div>
+
+  <div class="edbar">
+    <button id="edUndo" title="Ctrl+Z">撤销</button>
+    <button id="edRedo" title="Ctrl+Y">重做</button>
+    <button id="edResetAll">全部还原</button>
+    <label class="chk"><input type="checkbox" id="edScale" checked> 吸附到音阶</label>
+    <button class="primary" id="edPlayAll">整条试听</button>
+    <a class="dl" id="edDl" download hidden>下载 WAV</a>
+    <span class="hint" id="edSel" style="margin:0"></span>
+  </div>
+
+  <audio id="edAudio" controls style="width:100%;margin-top:12px;display:none"></audio>
+
+  <p class="hint">
+    <b>点块</b>选中 · <b>上下拖</b>改音高(吸附半音,按住 <b>Alt</b> 改音分)·
+    <b>拖右边缘</b>改长度 · <b>Delete</b> 留空 · <b>双击</b>还原这一块 ·
+    <b>Ctrl+Z / Ctrl+Y</b> 撤销重做 · <b>滚轮</b>横移 · <b>Shift+滚轮</b>缩放。
+    松手后自动试听前后 3 秒。
+  </p>
+  <p class="hint">★ 灰色矮条是气声 / 辅音,只能改长度,不能改音高;虚线是删掉的块。
+    编辑会存进 <b>recordings/&lt;时间&gt;_voice.edits.json</b>,原录音一个字不动。</p>
+</div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+let ws = null, connected = false;
+
+function note(text, warn) {
+  const el = document.createElement('div');
+  el.className = 'note' + (warn ? ' warn' : '');
+  el.textContent = text;
+  $('notes').prepend(el);
+  while ($('notes').children.length > 6) $('notes').lastChild.remove();
+  setTimeout(() => el.remove(), 9000);
+}
+
+function send(obj) {
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
+}
+
+// ---- 滑杆:每个滑杆的显示格式 + 发给后台的字段 ----
+const SLIDERS = [
+  ['sGain',   'vGain',    v => (v / 100).toFixed(2) + '×', v => ({ gain: v / 100 })],
+  ['sDenoise','vDenoise', v => v + '%',                    v => ({ denoise: v / 100 })],
+  ['sGate',   'vGate',    v => v + ' dB',                  v => ({ gate_db: v })],
+  ['sHP',     'vHP',      v => v + ' Hz',                  v => ({ hp_hz: v })],
+  ['sLow',    'vLow',     v => v + ' dB',                  v => ({ eq_low: v })],
+  ['sMid',    'vMid',     v => v + ' dB',                  v => ({ eq_mid: v })],
+  ['sHigh',   'vHigh',    v => v + ' dB',                  v => ({ eq_high: v })],
+  ['sDeess',  'vDeess',   v => v + '%',                    v => ({ deess: v / 100 })],
+  ['sRatio',  'vRatio',   v => v + ':1',                   v => ({ comp_ratio: v })],
+  ['sThr',    'vThr',     v => v + ' dB',                  v => ({ comp_threshold: v })],
+  ['sReverb', 'vReverb',  v => v + '%',                    v => ({ reverb: v / 100 })],
+  ['sBacking','vBacking', v => v + '%',                    v => ({ backing: v / 100 })],
+  ['sMonitor','vMonitor', v => v + '%',                    v => ({ monitor: v / 100 })],
+  ['sMonDn',  'vMonDn',   v => v + '%',                    v => ({ mon_denoise: v / 100 })],
+];
+
+for (const [sid, vid, fmt, msg] of SLIDERS) {
+  const s = $(sid), v = $(vid);
+  s.addEventListener('input', () => {
+    const val = parseFloat(s.value);
+    v.textContent = fmt(val);
+    send({ type: 'set', ...msg(val) });
+  });
+}
+
+// ★ 页面第一次连上后台时,把滑杆**拉到后台的真实参数上**。
+//   为什么必须有这一条:滑杆只在自己被拖动时才发消息,后台重启后参数回到默认,
+//   滑杆却还停在旧位置 —— 界面在对着一个引擎里根本不存在设置「调音」,还不报错。
+//   只在连上后的第一份状态里同步一次,之后不再动(不然会跟正在拖的手打架)。
+const SYNC_GET = {
+  sGain:    s => (s.params.gain ?? 1) * 100,
+  sDenoise: s => (s.params.denoise ?? 0) * 100,
+  sGate:    s => s.params.gate_db ?? -55,
+  sHP:      s => s.params.hp_hz ?? 80,
+  sLow:     s => s.params.eq_low ?? 0,
+  sMid:     s => s.params.eq_mid ?? 0,
+  sHigh:    s => s.params.eq_high ?? 0,
+  sDeess:   s => (s.params.deess ?? 0) * 100,
+  sRatio:   s => s.params.comp_ratio ?? 3,
+  sThr:     s => s.params.comp_threshold ?? -22,
+  sReverb:  s => (s.reverb_mix ?? 0) * 100,
+  sBacking: s => (s.backing_level ?? 0) * 100,
+  sMonitor: s => (s.monitor_level ?? 1) * 100,
+  sMonDn:   s => (s.mon_denoise ?? 0.65) * 100,
+};
+
+function syncFromStatus(s) {
+  if (!s.params) return false;
+  for (const [sid, vid, fmt] of SLIDERS) {
+    const get = SYNC_GET[sid];
+    if (!get) continue;
+    const val = get(s);
+    if (val == null || !isFinite(val)) continue;
+    const el = $(sid);
+    el.value = String(Math.round(val * 10) / 10);
+    $(vid).textContent = fmt(parseFloat(el.value));
+  }
+  $('cGate').checked = !!s.params.gate;
+  $('rowGate').style.opacity = $('cGate').checked ? 1 : .4;
+  $('cComp').checked = !!s.params.comp;
+  $('rowRatio').style.opacity = $('cComp').checked ? 1 : .4;
+  $('rowThr').style.opacity = $('cComp').checked ? 1 : .4;
+  $('cBypass').checked = !!s.params.bypass;
+  return true;
+}
+
+// ★ AI 那一级的状态**每一份状态都要跟**:它是异步加载的,也会因为换设备
+//   (采样率不是 48k)或模型出错被自动摘掉。只在首次同步里写一次 =
+//   界面永远停在「我以为它开着」。
+function reflectAI(s) {
+  if (!('ai' in s)) return;
+  $('cAI').checked = !!s.ai;
+  $('cAI').disabled = (s.sr !== 48000);
+  $('aiHint').textContent = s.ai_error
+    ? '★ ' + s.ai_error
+    : (s.ai ? `已开:额外 +${s.ai_latency_ms ?? 60}ms` : '关着。只支持 48000Hz。');
+}
+
+// ★ 延迟那两项也要「跟着状态走」:后台会自己改(比如重连后水位重新爬)。
+//   只在点的时候写一次 = 界面跟真相对不上。
+function reflectLat(s) {
+  if ('monitor_pre_ai' in s) $('cMonPre').checked = !!s.monitor_pre_ai;
+  if ('low_latency' in s) $('cLowLat').checked = !!s.low_latency;
+  const buf = Math.round(s.buffer_ms ?? 0);
+  const blk = s.block_ms ?? 10;      // ★ 块长是可配的,别在界面里写死 10
+  const ai = (s.ai && !s.monitor_pre_ai) ? (s.ai_latency_ms ?? 60) : 0;
+  const out = Math.round(s.out_latency_ms ?? 0);
+  const pc = Math.round(buf + blk + ai + out);
+  const mode = s.out_mode === 'exclusive' ? '独占'
+             : s.out_mode === 'shared'    ? '共享' : '—';
+  $('latHint').textContent =
+    `电脑这一侧 ≈ 缓冲 ${buf} + 处理 ${blk}` +
+    (ai ? ` + AI ${Math.round(ai)}` : '') +
+    ` + 输出 ${out}(${mode}) = ${pc}ms(手机采集和蓝牙另算)。`;
+}
+
+$('cMonPre').addEventListener('change', e =>
+  send({ type: 'set', monitor_pre_ai: e.target.checked }));
+$('cLowLat').addEventListener('change', e =>
+  send({ type: 'set', low_latency: e.target.checked }));
+
+$('cGate').addEventListener('change', e => {
+  send({ type: 'set', gate: e.target.checked });
+  $('rowGate').style.opacity = e.target.checked ? 1 : .4;
+});
+$('cComp').addEventListener('change', e => {
+  send({ type: 'set', comp: e.target.checked });
+  $('rowRatio').style.opacity = e.target.checked ? 1 : .4;
+  $('rowThr').style.opacity = e.target.checked ? 1 : .4;
+});
+// ★ 直通只是「听」,不写进 config.toml —— 存成直通下次一开机就是原声,
+//   那会让人以为调音整个坏了。
+$('cBypass').addEventListener('change', e =>
+  send({ type: 'set', bypass: e.target.checked }));
+
+// ★ 保存参数:写进 config.toml 的 [voice] 段。滑杆本身只改内存。
+$('btnSavePreset').addEventListener('click', async () => {
+  $('saveHint').textContent = '正在保存…';
+  try {
+    const r = await fetch('/api/save_preset', { method: 'POST' });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.detail || ('HTTP ' + r.status));
+    $('saveHint').textContent = `已保存(${j.saved} 项)→ ${j.path}`;
+    note('调音参数已存进 config.toml');
+  } catch (err) {
+    $('saveHint').textContent = '★ 保存失败:' + err.message;
+    note('保存失败:' + err.message, true);
+  }
+});
+
+// ★ AI 降噪:开关发给后台,但**界面不先自己打勾** —— 模型要 1 秒加载,
+//   加载失败时状态会把它拨回去。勾上去等于撒谎。
+$('cAI').addEventListener('change', e => {
+  send({ type: 'set', ai: e.target.checked });
+  $('aiHint').textContent = e.target.checked ? '正在加载模型…' : '关着。';
+});
+
+// ---- 录音 ----
+let recording = false;
+$('btnRec').addEventListener('click', () => {
+  if (!connected) { note('后台没连上', true); return; }
+  if (!recording) { send({ type: 'record_start' }); }
+  else { send({ type: 'record_stop' }); }
+});
+
+// ---- 录音列表 / 导出 ----
+function niceName(name) {
+  // 2026-10-18_17-04-43_mix.wav -> 10-18 17:04:43 成品
+  const m = name.match(/(\d{4})-(\d\d)-(\d\d)_(\d\d)-(\d\d)-(\d\d)_(mix|voice)/);
+  if (!m) return name;
+  return `${m[2]}-${m[3]} ${m[4]}:${m[5]}:${m[6]} · ${m[7] === 'mix' ? '成品' : '干声'}`;
+}
+
+async function loadRecs() {
+  const box = $('recList');
+  try {
+    const r = await fetch('/api/recordings').then(r => r.json());
+    if (!r.files || !r.files.length) {
+      box.innerHTML = '<div class="hint">还没有录音</div>';
+      return;
+    }
+    box.innerHTML = r.files.map(f => {
+      const mb = (f.size / 1048576).toFixed(1);
+      return `<div class="recrow">
+        <span class="recname" title="${f.name}">${niceName(f.name)}</span>
+        <span class="recmeta">${f.sec}s · ${mb}MB</span>
+        <a class="dl" href="/recordings/${encodeURIComponent(f.name)}" download>WAV</a>
+        <a class="dl" href="/api/export_mp3/${encodeURIComponent(f.name)}" download>MP3</a>
+        <button class="del" data-name="${f.name}" title="删除这一条">✕</button>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    box.innerHTML = '<div class="hint">读不到录音列表</div>';
+  }
+}
+
+$('btnOpenRec').addEventListener('click', async () => {
+  const r = await fetch('/api/open_recordings').then(r => r.json());
+  if (!r.ok) note('★ 打不开文件夹:' + r.error, true);
+});
+$('btnRefreshRec').addEventListener('click', loadRecs);
+
+async function delOne(name) {
+  if (!confirm(`删除这一条?\n${name}\n(同名的 MP3 一起删,删了拿不回来)`)) return;
+  const r = await fetch('/api/recordings/' + encodeURIComponent(name), { method: 'DELETE' });
+  if (!r.ok) {
+    const j = await r.json().catch(() => ({}));
+    note('★ 删不掉:' + (j.detail || r.status), true);
+  }
+  loadRecs();
+}
+
+$('recList').addEventListener('click', e => {
+  const b = e.target.closest('button.del');
+  if (b) delOne(b.dataset.name);
+});
+
+$('btnClearRec').addEventListener('click', async () => {
+  const n = $('recList').querySelectorAll('.recrow').length;
+  if (!n) { note('没有录音可删'); return; }
+  // ★ 删文件不可逆,问两遍(全删只问两遍,单个只问一遍)
+  if (!confirm(`删掉全部 ${n} 条录音(含同名的 MP3)?\n删了拿不回来。`)) return;
+  if (!confirm('最后一问:真的全删?')) return;
+  const r = await fetch('/api/recordings', { method: 'DELETE' });
+  const j = await r.json().catch(() => ({}));
+  if (j.failed && j.failed.length) {
+    note('★ 这些删不掉(可能正在录):' + j.failed.join('、'), true);
+  } else {
+    note('已删除 ' + (j.deleted || 0) + ' 个文件');
+  }
+  loadRecs();
+});
+
+// ---- 设备和伴奏 ----
+// ★ 后台每 2 秒看一圈设备(蓝牙断了、换成有线耳机都会发现),
+//   一变就推 reload 过来 —— 这里重拉一遍,不用手动刷新页面。
+let curDevice = '';            // 后台实际在用的耳返设备(来自 status)
+
+async function loadDevices() {
+  const r = await fetch('/api/devices').then(r => r.json());
+  const sel = $('devSel');
+  sel.innerHTML = '<option value="">系统默认</option>' +
+    r.outputs.map(d => `<option value="${d.id}">${d.name}</option>`).join('');
+  // 选中「后台实际在用的那台」,不是浏览器缓存的旧值
+  if (curDevice) {
+    for (const o of sel.options) if (o.textContent === curDevice) sel.value = o.value;
+  }
+  await loadLoop(r);
+}
+
+async function loadLoop(pre) {
+  // ★ 以服务端「实际在抓哪台」为准 —— 换耳返时后台可能已经把环回停掉了
+  const r = pre || await fetch('/api/devices').then(r => r.json());
+  const lp = $('loopSel');
+  // ★ 这是「从电脑哪块声卡抓」,不是「电脑还是手机」——手机那条根本不存在
+  //   (浏览器页面只能拿麦克风,拿不到手机系统声音),所以在选项里写死一行说明。
+  lp.innerHTML = '<option value="">不放伴奏</option>' +
+    '<option value="__phone__" disabled>—— 手机上的音乐抓不到 ——</option>' +
+    (r.loopbacks || []).map(n => `<option value="${n}">电脑声音 · ${n}</option>`).join('');
+
+  markEar(curDevice);
+  if (r.loop_now) { lp.value = r.loop_now; return; }
+  // ★ 后台还没抓伴奏时,把上次选的那台接回来(播放器每次都在同一块声卡上)
+  const last = localStorage.getItem('singmicLoop') || '';
+  if (last && [...lp.options].some(o => o.value === last)) {
+    lp.value = last;
+    send({ type: 'loop', device: last });
+  }
+}
+
+// ★ 伴奏来源里那一台要是正好是耳返设备,直接灰掉 ——
+//   抓它会把自己的声音再混一遍,啸叫。(后台也会拒绝,这里是提前说明白)
+function markEar(dev) {
+  for (const o of $('loopSel').options) {
+    if (!o.value || o.value.startsWith('__')) continue;
+    const isEar = !!dev && o.value === dev;
+    o.disabled = isEar;
+    o.textContent = (isEar ? '★ ' : '电脑声音 · ') + o.value +
+      (isEar ? '(耳返在用,抓了会啸叫)' : '');
+  }
+}
+
+$('devSel').addEventListener('change', () => {
+  const opt = $('devSel').options[$('devSel').selectedIndex];
+  send({ type: 'output', device: opt.textContent });
+  note('切到:' + opt.textContent);
+});
+$('loopSel').addEventListener('change', () => {
+  const v = $('loopSel').value;
+  localStorage.setItem('singmicLoop', v);     // 下次开页面自己接回来
+  send({ type: 'loop', device: v });
+});
+
+// ★ 文件伴奏的界面已经撤了(要的是「电脑/手机正在放的音乐」,不是选文件)。
+//   后台的 /api/backing 和文件播放代码还在,config.toml 里写 file 仍然能用。
+
+// ---- 悬浮窗:切到音乐软件去放歌时也能开始/停止录音 ----
+// ★ 用浏览器的 Document Picture-in-Picture:开出来的是**独立窗口**,
+//   会一直浮在其他程序上面。要点:
+//   · 里面的 HTML 要自己建(PIP 窗口的 document 是另一个);
+//   · 事件回调写在**本页**的脚本里就能用本页的 send/recording,同源,不用跨窗口通信;
+//   · 主页面一关,悬浮窗跟着关。
+let pipWin = null;
+let lastStatus = null;
+
+const PIP_CSS = `
+/* ★ 悬浮窗是**另一个 document**,主页面 :root 里那两个变量传不过来,必须在这儿再写一遍。 */
+:root{--cur:url("/static/cursor.png") 3 2,url("/static/cursor.svg") 3 2,default;--curp:url("/static/cursor.png") 3 2,url("/static/cursor.svg") 3 2,pointer}
+body{margin:0;padding:10px 12px;background:#0f1115;color:#e8ecf1;
+     font-family:system-ui,-apple-system,"Segoe UI",sans-serif;
+     display:flex;flex-direction:column;gap:8px;height:100vh;box-sizing:border-box;overflow:hidden;
+     cursor:var(--cur)}
+.r{display:flex;align-items:center;justify-content:space-between;font-size:12px;color:#9aa4b2;gap:8px}
+.dot{width:8px;height:8px;border-radius:50%;background:#4b5563;display:inline-block;margin-right:6px}
+.dot.ok{background:#4ade80}
+.meter{height:9px;background:#1a1f27;border-radius:5px;overflow:hidden;flex:1}
+.meter>i{display:block;height:100%;width:0%;background:linear-gradient(90deg,#22d3ee,#4ade80 60%,#fbbf24 85%,#f87171)}
+#pipBtn{font:inherit;font-size:15px;font-weight:700;padding:11px;border-radius:10px;
+        border:0;cursor:var(--curp);background:#22d3ee;color:#06121a}
+#pipBtn.rec{background:#f87171;color:#230808}
+#pipBtn:disabled{opacity:.45;cursor:var(--cur)}
+.small{font-size:11px;color:#5d6878;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+`;
+
+async function openPip() {
+  if (!('documentPictureInPicture' in window)) {
+    note('★ 这个浏览器不支持悬浮窗(要 Edge / Chrome 116 以上)', true);
+    return;
+  }
+  let w;
+  try {
+    w = await documentPictureInPicture.requestWindow({ width: 300, height: 178 });
+  } catch (e) {
+    note('★ 悬浮窗打不开:' + e.message, true);
+    return;
+  }
+  pipWin = w;
+  const d = w.document;
+  const st = d.createElement('style');
+  st.textContent = PIP_CSS;
+  d.head.appendChild(st);
+  d.body.innerHTML =
+    '<div class="r"><span><span class="dot" id="pipDot"></span><span id="pipPhone">手机没连</span></span>' +
+    '<span id="pipTime">未录音</span></div>' +
+    '<div class="r"><span id="pipLv" style="width:56px">—</span><span class="meter"><i id="pipBar"></i></span></div>' +
+    '<button id="pipBtn">开始录音</button>' +
+    '<div class="small" id="pipDev">—</div>';
+  d.getElementById('pipBtn').addEventListener('click', () => {
+    if (!connected) return;
+    send({ type: recording ? 'record_stop' : 'record_start' });
+  });
+  w.addEventListener('pagehide', () => { pipWin = null; });
+  renderPip(lastStatus);
+}
+
+function renderPip(s) {
+  if (!pipWin || !s) return;
+  try {
+    const d = pipWin.document;
+    const db = 20 * Math.log10((s.rms || 1e-9));
+    d.getElementById('pipBar').style.width =
+      Math.max(0, Math.min(100, (db + 60) / 60 * 100)) + '%';
+    d.getElementById('pipLv').textContent = db > -89 ? db.toFixed(0) + 'dB' : '—';
+    d.getElementById('pipDot').className = 'dot' + (s.phone ? ' ok' : '');
+    d.getElementById('pipPhone').textContent = s.phone ? '手机在线' : '手机没连';
+    const b = d.getElementById('pipBtn');
+    b.textContent = s.recording ? '停止录音' : '开始录音';
+    b.className = s.recording ? 'rec' : '';
+    b.disabled = !connected;
+    d.getElementById('pipTime').textContent = s.recording ? `已录 ${s.recorded_s} 秒` : '未录音';
+    d.getElementById('pipDev').textContent =
+      (s.device || '—') + (s.buffer_ms != null ? ` · 缓冲 ${s.buffer_ms}ms` : '')
+      + (s.underruns ? ` · 欠载 ${s.underruns}` : '');
+  } catch (e) {
+    pipWin = null;          // 悬浮窗已经关了
+  }
+}
+
+$('btnPip').addEventListener('click', openPip);
+
+// ★ 手机自报的采集参数。浏览器可以不理会我们的「关掉处理」要求,
+//   所以这一行是看它到底照没照办 —— 不用再靠频谱反推。
+function reflectCap(s) {
+  const c = s.cap || {};
+  if (!c.rate) { $('capHint').textContent = '手机还没报采集参数(页面连上后会自动显示)。'; return; }
+  const bad = [];
+  if (c.ec) bad.push('回声消除');
+  if (c.ns) bad.push('降噪');
+  if (c.agc) bad.push('自动增益');
+  $('capHint').textContent =
+    `手机实际采集:${c.rate} Hz · ${c.ch ?? '?'} 声道 · ` +
+    (bad.length ? `★ 浏览器仍开着 ${bad.join('/')}` : '三项处理都关着 ✓') +
+    (c.label ? ` · ${c.label}` : '');
+}
+
+// ---- 状态 ----
+let peakHold = 0, peakUntil = 0;
+function onStatus(s) {
+  if (!window.__synced && syncFromStatus(s)) window.__synced = true;
+  reflectAI(s);
+  reflectLat(s);
+  reflectCap(s);
+  const db = 20 * Math.log10((s.rms || 1e-9));
+  const pct = Math.max(0, Math.min(100, (db + 60) / 60 * 100));
+  $('bar').style.width = pct + '%';
+  const now = performance.now();
+  if ((s.peak || 0) > peakHold) { peakHold = s.peak; peakUntil = now + 900; }
+  else if (now > peakUntil) peakHold *= 0.94;
+  const pdb = 20 * Math.log10((peakHold || 1e-9));
+  $('pk').style.left = Math.max(0, Math.min(100, (pdb + 60) / 60 * 100)) + '%';
+  const loopTxt = s.loop_on
+    ? ` · 伴奏 ${(20 * Math.log10(s.loop_rms || 1e-9)).toFixed(0)}dB`
+    : '';
+  // ★ 目标水位会自己调,所以要把「目标多少毫秒」写出来 —— 不然界面上只能看到
+  //   百分比,根本不知道延迟到底是多少。
+  const tgtTxt = (s.target_ms != null) ? `${s.target_ms}ms` : '—';
+  const aiTxt = s.ai ? ` · AI 降噪 +${s.ai_latency_ms ?? 60}ms` : '';
+  $('levels').textContent =
+    `${s.sr} Hz · 缓冲 ${s.buffer_ms ?? '—'}ms/目标 ${tgtTxt} · 欠载 ${s.underruns} · 溢出 ${s.overruns}${loopTxt}${aiTxt}`;
+  // ★ 环回起不来时(设备被别的程序独占等)必须说出来,不能装没事
+  if (s.loop_error && s.loop_error !== window.__loopErr) {
+    window.__loopErr = s.loop_error;
+    note('★ 伴奏抓不到:' + s.loop_error, true);
+  }
+
+  if ((s.device || '') !== curDevice) {
+    curDevice = s.device || '';
+    markEar(curDevice);
+  }
+  $('pPhone').textContent = s.phone ? '手机在线' : '手机没连';
+  $('pPhone').className = 'pill' + (s.phone ? ' ok' : '');
+  $('pUnder').hidden = !(s.underruns > 0);
+  recording = !!s.recording;
+  $('pRec').hidden = !recording;
+  $('btnRec').textContent = recording ? '停止录音' : '开始录音';
+  $('btnRec').className = recording ? 'rec' : 'primary';
+  if (recording) $('recInfo').textContent = `已录 ${s.recorded_s} 秒`;
+  lastStatus = s;
+  renderPip(s);
+}
+
+function connect() {
+  const url = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws/ui';
+  ws = new WebSocket(url);
+  ws.onopen = () => {
+    connected = true;
+    window.__synced = false;    // ★ 每次(重)连上都同步一次:后台可能刚重启
+    note('后台已连上');
+  };
+  ws.onclose = () => {
+    connected = false;
+    note('后台断开了,3 秒后重连…', true);
+    setTimeout(connect, 3000);
+  };
+  ws.onmessage = ev => {
+    const m = JSON.parse(ev.data);
+    if (m.type === 'status') onStatus(m);
+    else if (m.type === 'reload') loadDevices();
+    else if (m.type === 'notice') {
+      note(m.text, String(m.text).startsWith('★'));
+      if (String(m.text).includes('录音已保存')) loadRecs();   // 录完立刻出现在列表里
+    }
+  };
+}
+
+// ===========================================================================
+// 音符块编辑器
+// ===========================================================================
+const NAMES12 = 'C C# D D# E F F# G G# A A# B'.split(' ');
+const ED_SCALES = { major: [0, 2, 4, 5, 7, 9, 11], minor: [0, 2, 3, 5, 7, 8, 10] };
+const ED = {
+  name: '', blocks: [], edits: {}, sel: -1, dur: 0, key: 'C', mode: 'major',
+  view: { t0: 0, pps: 40 }, drag: null, undo: [], redo: [], lastFull: '',
+};
+const edCanvas = $('edCanvas');
+const edCtx = edCanvas.getContext('2d');
+const ED_L = 40, ED_T = 18, ED_B = 26;      // 左 / 上 / 下 留白
+let edW = 600, edH = 240, edRow = 12, edLo = 48, edHi = 72;
+
+function edLayout() {
+  const r = edCanvas.getBoundingClientRect();
+  edW = Math.max(320, Math.round(r.width || 600));
+  edH = 240;
+  const dpr = window.devicePixelRatio || 1;
+  edCanvas.width = Math.round(edW * dpr);
+  edCanvas.height = Math.round(edH * dpr);
+  edCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  edLanes();
+}
+
+function bMidi(b) { return Math.round(69 + 12 * Math.log2(Math.max(b.f0 || 440, 20) / 440)); }
+function edMidi(e) { return (e.semis || 0) + (e.cents || 0) / 100; }
+function midiName(m) { const n = Math.round(m); return NAMES12[((n % 12) + 12) % 12] + (Math.floor(n / 12) - 1); }
+
+function edLanes() {
+  const ms = ED.blocks.filter(b => b.kind === 'note').map(bMidi);
+  let lo = ms.length ? Math.min(...ms) : 57;
+  let hi = ms.length ? Math.max(...ms) : 69;
+  lo -= 4; hi += 4;
+  if (hi - lo < 12) { const c = Math.round((hi + lo) / 2); lo = c - 6; hi = c + 6; }
+  edLo = lo; edHi = hi;
+  edRow = Math.max(6, (edH - ED_T - ED_B) / (hi - lo + 1));
+}
+
+const edX = t => ED_L + (t - ED.view.t0) * ED.view.pps;
+const edT = x => ED.view.t0 + (x - ED_L) / ED.view.pps;
+const edY = m => ED_T + (edHi - m + 0.5) * edRow;
+
+function edBlockLen(b) {
+  const e = ED.edits[b.id];
+  return (e && e.len) ? e.len : (b.t1 - b.t0);
+}
+function edMaxLen(b) {
+  const i = ED.blocks.indexOf(b);
+  const end = (i + 1 < ED.blocks.length) ? ED.blocks[i + 1].t1 : ED.dur;
+  return Math.max(0.02, end - b.t0 - 0.02);     // 紧邻的下一块至少留 20ms
+}
+
+function edGridStep() {
+  const cand = [0.05, 0.1, 0.2, 0.25, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300];
+  for (const s of cand) if (s * ED.view.pps >= 70) return s;
+  return 600;
+}
+function fmtT(t) {
+  if (t < 60) return t.toFixed(t < 10 ? 2 : 1) + 's';
+  const m = Math.floor(t / 60), s = Math.floor(t % 60);
+  return m + ':' + String(s).padStart(2, '0');
+}
+
+function edDraw() {
+  if (!edW) edLayout();
+  const c = edCtx;
+  c.clearRect(0, 0, edW, edH);
+  c.fillStyle = '#0b0e13'; c.fillRect(0, 0, edW, edH);
+  c.textBaseline = 'middle';
+
+  // 音高行
+  c.font = '10px ui-monospace, monospace';
+  for (let m = edLo; m <= edHi; m++) {
+    const y = edY(m);
+    const isC = ((m % 12) + 12) % 12 === 0;
+    c.strokeStyle = isC ? '#1c2532' : '#131a24';
+    c.beginPath(); c.moveTo(ED_L, y + edRow / 2); c.lineTo(edW, y + edRow / 2); c.stroke();
+    if (isC) {
+      c.fillStyle = '#3f4b5e';
+      c.fillText('C' + (Math.floor(m / 12) - 1), 6, y);
+    }
+  }
+
+  // 时间刻度
+  const step = edGridStep();
+  const tEnd = edT(edW);
+  c.font = '10px ui-monospace, monospace';
+  for (let t = Math.floor(ED.view.t0 / step) * step; t <= tEnd; t += step) {
+    const x = edX(t);
+    if (x < ED_L - 1) continue;
+    c.strokeStyle = '#161e2a';
+    c.beginPath(); c.moveTo(x, ED_T); c.lineTo(x, edH - ED_B); c.stroke();
+    c.fillStyle = '#4b5769';
+    c.fillText(fmtT(t), x + 3, edH - 12);
+  }
+
+  // 块
+  c.save();
+  c.beginPath(); c.rect(ED_L, ED_T, edW - ED_L, edH - ED_T - ED_B); c.clip();
+  const soundY = edH - ED_B + 6;
+  for (const b of ED.blocks) {
+    const e = ED.edits[b.id] || {};
+    const x0 = edX(b.t0);
+    const x1 = edX(b.t0 + edBlockLen(b));
+    const w = Math.max(2, x1 - x0);
+    if (x1 < ED_L - 4 || x0 > edW + 4) continue;
+
+    if (b.kind === 'silence') continue;
+
+    if (b.kind === 'sound') {
+      c.fillStyle = e.deleted ? 'rgba(120,130,145,.22)' : '#46536a';
+      c.fillRect(x0, soundY, w, 8);
+      if (e.deleted) {
+        c.setLineDash([3, 3]); c.strokeStyle = 'rgba(200,210,225,.35)';
+        c.strokeRect(x0 + .5, soundY + .5, Math.max(2, w - 1), 7);
+        c.setLineDash([]);
+      }
+      continue;
+    }
+
+    const m = bMidi(b) + edMidi(e);
+    const y = edY(m) - edRow / 2 + 1;
+    const h = Math.max(4, edRow - 2);
+    if (e.deleted) {
+      c.setLineDash([3, 3]);
+      c.strokeStyle = 'rgba(200,210,225,.35)';
+      c.strokeRect(x0 + .5, y + .5, Math.max(2, w - 1), h - 1);
+      c.setLineDash([]);
+      continue;
+    }
+    const edited = (e.semis || 0) !== 0 || (e.cents || 0) !== 0 || e.len != null;
+    c.fillStyle = edited ? '#c2761a' : '#2f6f9f';
+    c.fillRect(x0, y, w, h);
+    if (ED.sel === b.id) {
+      c.strokeStyle = '#e8ecf1'; c.lineWidth = 2;
+      c.strokeRect(x0 + 1, y + 1, Math.max(2, w - 2), h - 2);
+      c.lineWidth = 1;
+    }
+    if (w > 34) {
+      c.fillStyle = 'rgba(255,255,255,.85)';
+      c.font = '10px system-ui, sans-serif';
+      c.fillText(midiName(m), x0 + 4, y + h / 2);
+    }
+  }
+  c.restore();
+
+  // 左边框
+  c.strokeStyle = '#1f2732';
+  c.beginPath(); c.moveTo(ED_L - .5, 0); c.lineTo(ED_L - .5, edH); c.stroke();
+}
+
+function edBlockAt(x, y) {
+  const t = edT(x);
+  const soundY = edH - ED_B + 6;
+  for (let i = ED.blocks.length - 1; i >= 0; i--) {
+    const b = ED.blocks[i];
+    if (b.kind === 'silence') continue;
+    const e = ED.edits[b.id] || {};
+    const L = edBlockLen(b);
+    if (t < b.t0 || t > b.t0 + L) continue;
+    const nearRight = (edX(b.t0 + L) - x) < 6;
+    if (b.kind === 'note') {
+      const yy = edY(bMidi(b) + edMidi(e));
+      if (Math.abs(y - yy) <= edRow / 2 + 2) return { b, edge: nearRight };
+    } else if (y >= soundY - 3 && y <= soundY + 12) {
+      return { b, edge: nearRight };
+    }
+  }
+  return null;
+}
+
+function edSelInfo() {
+  const s = $('edSel');
+  if (ED.sel < 0) { s.textContent = ''; return; }
+  const b = ED.blocks.find(q => q.id === ED.sel);
+  if (!b) { s.textContent = ''; return; }
+  const e = ED.edits[b.id] || {};
+  const L = edBlockLen(b);
+  if (b.kind === 'sound') {
+    s.textContent = `${b.t0.toFixed(2)}–${(b.t0 + L).toFixed(2)}s · 气声/辅音(只能改长度)`;
+    return;
+  }
+  const m = bMidi(b) + edMidi(e);
+  const d = (e.semis || 0) * 100 + (e.cents || 0);
+  s.textContent = `${midiName(m)} · ${d > 0 ? '+' : ''}${d.toFixed(0)} 音分 · ${L.toFixed(2)}s` +
+    (e.deleted ? ' · 已删除' : '');
+}
+
+function edSnap(m) {
+  const root = Math.max(0, NAMES12.indexOf(ED.key));
+  const sc = ED_SCALES[ED.mode] || ED_SCALES.major;
+  for (let d = 0; d <= 6; d++) {
+    for (const s of (d === 0 ? [0] : [-d, d])) {
+      const mm = m + s;
+      if (sc.includes(((mm - root) % 12 + 12) % 12)) return mm;
+    }
+  }
+  return m;
+}
+
+function edPushUndo() {
+  ED.undo.push(JSON.stringify(ED.edits));
+  if (ED.undo.length > 60) ED.undo.shift();
+  ED.redo = [];
+}
+
+edCanvas.addEventListener('mousedown', ev => {
+  if (!ED.blocks.length) return;
+  ev.preventDefault();
+  const r = edCanvas.getBoundingClientRect();
+  const x = ev.clientX - r.left, y = ev.clientY - r.top;
+  const hit = edBlockAt(x, y);
+  if (!hit) { ED.sel = -1; edDraw(); edSelInfo(); return; }
+  ED.sel = hit.b.id;
+  const e = ED.edits[hit.b.id] || {};
+  ED.drag = {
+    id: hit.b.id, edge: hit.edge, x0: x, y0: y,
+    len0: edBlockLen(hit.b), semis0: e.semis || 0, cents0: e.cents || 0,
+    dirty: false,
+  };
+  edDraw(); edSelInfo();
+});
+
+window.addEventListener('mousemove', ev => {
+  const d = ED.drag;
+  if (!d) return;
+  const r = edCanvas.getBoundingClientRect();
+  const x = ev.clientX - r.left, y = ev.clientY - r.top;
+  const b = ED.blocks.find(q => q.id === d.id);
+  if (!b) return;
+
+  if (!d.dirty) { edPushUndo(); d.dirty = true; }   // ★ 真的动了才占一步撤销
+  const e = ED.edits[b.id] || (ED.edits[b.id] = {});
+
+  if (d.edge) {
+    const L = Math.max(0.02, Math.min(edMaxLen(b),
+      d.len0 + (x - d.x0) / ED.view.pps));
+    e.len = Math.round(L * 1000) / 1000;
+    delete e.deleted;
+  } else {
+    const raw = d.semis0 + d.cents0 / 100 - (y - d.y0) / edRow;
+    if (ev.altKey) {
+      const s = Math.round(raw);
+      e.semis = s;
+      e.cents = Math.round((raw - s) * 100);
+    } else {
+      let m = Math.round(bMidi(b) + raw);
+      if ($('edScale').checked) m = edSnap(m);
+      e.semis = m - bMidi(b);
+      e.cents = 0;
+    }
+    delete e.deleted;
+  }
+  edDraw(); edSelInfo();
+});
+
+window.addEventListener('mouseup', () => {
+  const d = ED.drag;
+  if (!d) return;
+  ED.drag = null;
+  if (d.dirty) edCommit(d.id);
+});
+
+edCanvas.addEventListener('dblclick', ev => {
+  const r = edCanvas.getBoundingClientRect();
+  const hit = edBlockAt(ev.clientX - r.left, ev.clientY - r.top);
+  if (!hit) return;
+  edPushUndo();
+  delete ED.edits[hit.b.id];
+  edDraw(); edSelInfo(); edCommit(hit.b.id);
+});
+
+edCanvas.addEventListener('wheel', ev => {
+  if (!ED.blocks.length) return;
+  ev.preventDefault();
+  const r = edCanvas.getBoundingClientRect();
+  const x = ev.clientX - r.left;
+  if (ev.shiftKey) {
+    const t = edT(x);
+    const k = ev.deltaY < 0 ? 1.25 : 0.8;
+    ED.view.pps = Math.max(2, Math.min(4000, ED.view.pps * k));
+    ED.view.t0 = Math.max(0, t - (x - ED_L) / ED.view.pps);
+  } else {
+    ED.view.t0 = Math.max(0, ED.view.t0 + (ev.deltaY > 0 ? 1 : -1) * 40 / ED.view.pps);
+  }
+  edDraw();
+}, { passive: false });
+
+document.addEventListener('keydown', ev => {
+  if (!ED.blocks.length) return;
+  const tag = (document.activeElement || {}).tagName;
+  if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+
+  if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'z') {
+    ev.preventDefault(); edUndo(); return;
+  }
+  if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'y') {
+    ev.preventDefault(); edRedo(); return;
+  }
+  if (ED.sel < 0) return;
+  if (ev.key === 'Delete' || ev.key === 'Backspace') {
+    ev.preventDefault();
+    edPushUndo();
+    const e = ED.edits[ED.sel] || (ED.edits[ED.sel] = {});
+    e.deleted = true;
+    edDraw(); edSelInfo(); edCommit(ED.sel);
+  }
+});
+
+function edUndo() {
+  if (!ED.undo.length) return;
+  ED.redo.push(JSON.stringify(ED.edits));
+  ED.edits = JSON.parse(ED.undo.pop());
+  edDraw(); edSelInfo(); edCommit(ED.sel);
+}
+function edRedo() {
+  if (!ED.redo.length) return;
+  ED.undo.push(JSON.stringify(ED.edits));
+  ED.edits = JSON.parse(ED.redo.pop());
+  edDraw(); edSelInfo(); edCommit(ED.sel);
+}
+
+$('edUndo').addEventListener('click', edUndo);
+$('edRedo').addEventListener('click', edRedo);
+$('edResetAll').addEventListener('click', () => {
+  if (!ED.blocks.length || !Object.keys(ED.edits).length) { note('还没有改动'); return; }
+  if (!confirm('把所有改动还原成原声?(这一下可以撤销)')) return;
+  edPushUndo();
+  ED.edits = {};
+  edDraw(); edSelInfo(); edCommit(ED.sel);
+});
+
+async function edRender(body, playWin) {
+  const r = await fetch('/api/render', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.detail || ('HTTP ' + r.status));
+  if (playWin !== undefined) {
+    const a = $('edAudio');
+    a.style.display = 'block';
+    a.src = j.url;
+    a.play().catch(() => {});
+  }
+  return j;
+}
+
+async function edCommit(selId) {
+  if (!ED.name) return;
+  const b = ED.blocks.find(q => q.id === selId);
+  let win = null;
+  if (b) {
+    const a = Math.max(0, b.t0 - 2);
+    const z = Math.min(ED.dur, b.t0 + edBlockLen(b) + 3);
+    win = [a, Math.max(z, a + 1.5)];
+  }
+  try {
+    const j = await edRender({ name: ED.name, edits: ED.edits, remix: true,
+                               save: true, window: win }, true);
+    ED.lastFull = '';
+    $('edDl').hidden = true;
+    $('edInfo').textContent =
+      `已改 · 局部渲染 ${j.sec_cost}s · 试听 ${j.sec.toFixed(1)} 秒` +
+      (j.remixed ? '(带伴奏)' : '(纯干声,没找到 _mix)');
+  } catch (err) {
+    note('★ 渲染失败:' + err.message, true);
+  }
+}
+
+$('edPlayAll').addEventListener('click', async () => {
+  if (!ED.name) { note('先选一条录音切成块'); return; }
+  $('edInfo').textContent = '整条渲染中…';
+  try {
+    const j = await edRender({ name: ED.name, edits: ED.edits, remix: true,
+                               save: true, window: null }, true);
+    ED.lastFull = j.url;
+    const dl = $('edDl');
+    dl.href = j.url;
+    dl.download = ED.name.replace(/_voice\.wav$/, '') + '_edited.wav';
+    dl.hidden = false;
+    $('edInfo').textContent = `整条渲染 ${j.sec_cost}s · ${j.sec.toFixed(1)} 秒 · ` +
+      (j.remixed ? '带伴奏' : '纯干声');
+  } catch (err) {
+    note('★ 渲染失败:' + err.message, true);
+  }
+});
+
+$('edLoad').addEventListener('click', () => edOpen($('edRec').value));
+
+async function edOpen(name) {
+  if (!name) return;
+  ED.name = name; ED.sel = -1; ED.undo = []; ED.redo = []; ED.lastFull = '';
+  { // 下拉框跟着走 —— 不然画布上是 A、框里显示 B,看着像切错了
+    const sel = $('edRec');
+    if (sel && [...sel.options].some(o => o.value === name)) sel.value = name;
+  }
+  $('edDl').hidden = true;
+  const a = $('edAudio'); a.pause(); a.style.display = 'none';
+  $('edInfo').textContent = '正在切成块…(7 分钟的录音约 10 秒)';
+  try {
+    const r = await fetch('/api/blocks', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.detail || ('HTTP ' + r.status));
+    ED.blocks = j.blocks || [];
+    ED.edits = j.edits || {};
+    ED.dur = j.dur || 0;
+    ED.key = j.key || 'C';
+    ED.mode = j.mode || 'major';
+    edLanes();
+    const first = ED.blocks.find(b => b.kind === 'note');
+    if (ED.dur <= 40) {
+      ED.view.t0 = 0;
+      ED.view.pps = Math.max(4, (edW - ED_L - 20) / Math.max(ED.dur, 1));
+    } else {
+      ED.view.t0 = Math.max(0, (first ? first.t0 : 0) - 2);
+      ED.view.pps = (edW - ED_L - 20) / 15;
+    }
+    edDraw(); edSelInfo();
+    const nEd = Object.keys(ED.edits).length;
+    $('edInfo').textContent =
+      `${ED.key} ${ED.mode === 'major' ? '大调' : '小调'} · 有声 ${j.voiced_s}s · ` +
+      `${ED.blocks.length} 块 · ${j.sec_cost}s` + (j.cached ? ' · 缓存' : '') +
+      (nEd ? ` · 上次编辑 ${nEd} 块` : '');
+  } catch (err) {
+    $('edInfo').textContent = '★ 切块失败:' + err.message;
+    note('★ 切块失败:' + err.message, true);
+  }
+}
+
+async function edLoadList() {
+  try {
+    const r = await fetch('/api/recordings').then(r => r.json());
+    const voices = (r.files || []).filter(f => f.name.endsWith('_voice.wav'));
+    const sel = $('edRec');
+    sel.innerHTML = voices.map(f =>
+      `<option value="${f.name}">${niceName(f.name)} · ${f.sec}s</option>`).join('');
+    if (voices.length) edOpen(voices[0].name);
+  } catch (e) { /* 列表拉不到就先空着 */ }
+}
+
+window.addEventListener('resize', () => { edLayout(); edDraw(); });
+edLayout();
+
+loadDevices();
+loadRecs();
+edLoadList();
+connect();
+</script>
+</body>
+</html>

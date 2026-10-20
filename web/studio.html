@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0b0d12">
+<link rel="icon" href="data:,">
+<title>SingMic Studio</title>
+<link rel="stylesheet" href="/static/studio.css?v=3">
+<!-- 自己画的霓虹指针:全局一个,十字/抓手/输入框那些也一并盖掉 -->
+<script src="/static/pointer.js?v=6" defer></script>
+</head>
+<body>
+
+<header id="top">
+  <a class="back" href="/" title="回控制台">←</a>
+  <button id="btnPlay" class="tp" title="播放 / 暂停 (空格)">▶</button>
+  <button id="btnStop" class="tp" title="停止 (Home 回开头)">■</button>
+  <label class="chk"><input type="checkbox" id="chkLoop"> 循环</label>
+  <span id="clock">001:01:000</span>
+
+  <span class="sep"></span>
+  <label class="fld">BPM
+    <input id="inBpm" type="number" min="40" max="240" step="0.1" value="120">
+  </label>
+  <button id="btnTap" class="mini" title="连点几下测速">Tap</button>
+  <button id="btnBpm" class="mini" title="从当前轨的音频自动测速">自动测速</button>
+  <label class="fld">拍号
+    <select id="selSig"><option value="4/4">4/4</option><option value="3/4">3/4</option></select>
+  </label>
+  <label class="chk"><input type="checkbox" id="chkMetro"> 节拍器</label>
+
+  <span class="sep"></span>
+  <label class="fld">吸附
+    <select id="selSnap">
+      <option value="bar">1 小节</option>
+      <option value="beat">1 拍</option>
+      <option value="1/8">1/8</option>
+      <option value="1/16" selected>1/16</option>
+      <option value="off">关</option>
+    </select>
+  </label>
+  <button id="btnZoomOut" class="mini">–</button>
+  <button id="btnZoomIn" class="mini">+</button>
+  <span class="sep"></span>
+  <span id="saveState">已保存</span>
+  <label class="fld" title="母带响度:BS.1770 归一 + 5ms 前瞻限幅">响度
+    <select id="selLoud">
+      <option value="-14" selected>-14 LUFS</option>
+      <option value="-9">-9 LUFS</option>
+      <option value="off">关</option>
+    </select>
+  </label>
+  <button id="btnAuto" class="mini" title="本机测量响度/峰值/频段/跑调,给出一份可勾选的调整方案(不上传)">✨ 一键调音</button>
+  <button id="btnRef" class="mini" title="拿原唱人声当参照,把你唱跑的地方收回去(本机分析,不上传)">🎤 跟原唱</button>
+  <button id="btnVoice" class="mini" title="云端的个人音色模型:延长/缩短时更接近你的声音(本地补音不需要它)">🎙 我的声音</button>
+  <button id="btnNL" class="mini" title="用一句话说听感,让 AI 改成参数(只发参数和你这句话)">💬 调音助手</button>
+  <button id="btnExport" class="mini">导出</button>
+  <button id="btnStems" class="mini" title="导出分轨 ZIP(给 FL / 别的 DAW);按住 Alt = 插件链之后">分轨</button>
+</header>
+
+<main>
+  <aside id="browser">
+    <div class="bhead">
+      <input id="projName" value="未命名" spellcheck="false">
+      <button id="btnAddTrack" class="mini" title="加一条空轨;双击混音台上的轨名可以改名">＋轨</button>
+      <button id="btnNew" class="mini" title="新建工程">新建</button>
+      <button id="btnCache" class="mini" title="渲染缓存占用 · 点一下清理没被引用的">缓存</button>
+    </div>
+    <div class="bhead">
+      <select id="projList" title="切换工程"></select>
+      <button id="btnDelProj" class="mini danger" title="删掉当前选中的工程(只删工程文件;媒体库里的音频不动)">删工程</button>
+      <button id="btnQuant" class="mini" title="选中的块吸到最近网格(只挪起点,不渲染)">对拍</button>
+      <button id="btnBig" class="mini" title="整页块编辑:把这一轨的块排成一整条,拖动/改长/删/切开">块编辑</button>
+      <button id="btnPitch" class="mini" title="标出跑调的块(只标,改不改你点)">跑调</button>
+      <button id="btnChords" class="mini" title="测和弦(★ 有人声鼓点会错,只用来建议和声)">和弦</button>
+    </div>
+    <div id="pitchMsg" class="pmsg" hidden></div>
+
+    <div class="bsec">
+      <div class="btitle">录音 <span id="recCount"></span>
+        <button id="btnRecRefresh" class="mini" title="刚在手机上录完?点这里刷新列表">刷新</button>
+      </div>
+      <div id="recList" class="blist"></div>
+    </div>
+
+    <div class="bsec">
+      <div class="btitle">媒体
+        <button id="btnImport" class="mini">导入</button>
+      </div>
+      <div id="mediaList" class="blist"></div>
+      <input id="fileImport" type="file" accept=".wav,.mp3,.flac,.ogg" hidden>
+    </div>
+
+    <div class="bsec" id="secBlocks" hidden>
+      <div class="btitle">切好的块 <span id="blockInfo"></span>
+        <select id="blockMode" class="mini" title="切法:按字/音节,或者按音高逐音">
+          <option value="syllable">按字/音节</option>
+          <option value="note">按音(逐音)</option>
+        </select>
+        <label id="blockAsrWrap" class="mini asrchk" title="用语音识别给块标上字/词(只标文字,不改切法)">
+          <input id="blockAsr" type="checkbox" checked> 识别
+        </label>
+        <button id="btnAsrDownload" class="mini" hidden
+                title="下载中文和英文识别模型(约 190MB,只下一次)">下载识别模型</button>
+        <button id="btnBlocksAll" class="mini" title="把这条录音的所有块铺成一条轨,整页编辑">整页编辑</button>
+      </div>
+      <div id="blockList" class="blist"></div>
+    </div>
+
+    <div class="bnote">
+      拖到右边摆位置 · 空格播放 · Delete 删 · Ctrl+Z 撤销<br>
+      双击轨名改名 · 顶部「＋轨」加空轨<br>
+      ←→ 挪选中的块(Shift 10ms / Alt 1ms)<br>
+      滚轮上下滚轨道 · Shift+滚轮横向走时间 · Ctrl+滚轮缩放<br>
+      ★ 原录音只读,改动都在工程里
+    </div>
+  </aside>
+
+  <section id="playArea">
+    <canvas id="plStatic"></canvas>
+    <canvas id="plOverlay"></canvas>
+  </section>
+
+  <aside id="inspector">
+    <div class="btitle">检查器</div>
+    <div id="inspBody" class="inote">选中一个块</div>
+  </aside>
+</main>
+
+<section id="bottom">
+  <div class="tabs">
+    <button data-tab="roll" class="on">钢琴卷帘</button>
+    <button data-tab="mix">混音台</button>
+    <button data-tab="fx">效果器</button>
+    <button data-tab="vst">VST</button>
+    <span class="grow"></span>
+    <span id="hint" class="hint"></span>
+  </div>
+  <div id="panelRoll" class="panel">
+    <canvas id="rollCanvas"></canvas>
+    <div class="pnote">先建一条「采样」轨,才能在这里画音符(阶段 3)</div>
+  </div>
+  <div id="panelMix" class="panel" hidden>
+    <div id="mixStrips"></div>
+  </div>
+  <div id="panelFx" class="panel" hidden>
+    <div id="fxWarn" class="fxwarn" hidden></div>
+    <div class="fxshell">
+      <div class="fxside">
+        <div class="fxhead">
+          <span>插件链:</span><b id="fxTrackName">—</b>
+          <span id="fxOrder" class="inote">从上到下 = 处理顺序</span>
+        </div>
+        <div id="fxSlots" class="fxslots"></div>
+        <div class="fxaddrow">
+          <select id="fxAddSel"></select>
+          <button id="fxAddBtn" class="btn">＋ 添加插件</button>
+        </div>
+        <div class="pnote">插件只作用于这一轨;导出时会按同一顺序重算。</div>
+      </div>
+      <div id="fxParams" class="fxparams">
+        <div class="inote">选一个插件看参数</div>
+      </div>
+    </div>
+  </div>
+  <div id="panelVst" class="panel" hidden>
+    <div id="vstWarn" class="fxwarn" hidden></div>
+    <div class="fxshell">
+      <div class="fxside">
+        <div class="fxhead">
+          <span>该轨 VST:</span><b id="vstTrackName">—</b>
+          <span class="inote">从上到下 = 处理顺序</span>
+        </div>
+        <div id="vstDirs" class="vstnote"></div>
+        <div id="vstSlots" class="fxslots"></div>
+        <div class="fxaddrow">
+          <select id="vstAddSel"></select>
+          <button id="vstAddBtn" class="btn">＋ 添加 VST</button>
+          <button id="vstScanBtn" class="btn" title="重新扫描插件文件夹">刷新</button>
+        </div>
+        <div class="vstnote" title="VST 由本地进程离线计算,浏览器跑不了。把 .vst3 解压/复制到上面的文件夹再点「刷新」;加进来后打开「冻结」,正常播放才能听到它。">
+          ★ <strong>离线</strong>计算 · 解压 <code>.vst3</code> 到上面文件夹 → 刷新 · 开「冻结」才听得到
+        </div>
+      </div>
+      <div id="vstParams" class="fxparams">
+        <div class="inote">选一个插件看参数</div>
+      </div>
+    </div>
+    <div class="vstbar">
+      <label class="chk"><input type="checkbox" id="vstFreeze"> 冻结这一轨</label>
+      <span id="vstFreezeState" class="vststate"></span>
+      <span class="grow"></span>
+      <button id="vstAudBtn" class="btn">▶ 试听这一段(循环)</button>
+      <button id="vstDryBtn" class="btn" title="同一段再渲染一次,把 VST 拿掉">听干声 A/B</button>
+      <span id="vstLat" class="inote"></span>
+      <span class="sep"></span>
+      <button id="vstPrevBtn" class="btn" title="走导出那条路径渲染整曲,听最终结果">▶ 渲染试听整曲</button>
+      <span id="vstPrevState" class="inote"></span>
+      <audio id="vstPrev" controls hidden style="height:28px"></audio>
+    </div>
+  </div>
+</section>
+
+<div id="autoPanel" class="autopanel" hidden>
+  <div class="autohead">
+    <b>✨ 一键调音</b>
+    <span class="inote">本机测量 · 不上传 · 只出方案</span>
+    <span class="grow"></span>
+    <button id="autoClose" class="mini" title="关掉,什么都不改">×</button>
+  </div>
+  <div id="autoMeasure" class="automeas"></div>
+  <div id="autoBody" class="autobody"></div>
+  <div id="autoNotes" class="autonotes"></div>
+  <div class="autofoot">
+    <button id="autoSelAll" class="mini">全选</button>
+    <button id="autoSelVol" class="mini">只留音量</button>
+    <button id="autoSelFx" class="mini">只留效果</button>
+    <button id="autoSelVst" class="mini">只看 VST</button>
+    <button id="autoSelTune" class="mini">只留修音</button>
+    <span class="grow"></span>
+    <button id="autoCancel" class="mini">取消</button>
+    <button id="autoApply" class="btn">应用</button>
+  </div>
+</div>
+
+<div id="refPanel" class="autopanel" hidden>
+  <div class="autohead">
+    <b>🎤 跟原唱矫正</b>
+    <span class="inote">本机 YIN 测音高 · 不上传</span>
+    <span class="grow"></span>
+    <button id="refClose" class="mini" title="关掉,什么都不改">×</button>
+  </div>
+  <div class="refrow">
+    <label>原唱轨 <select id="refRef"></select></label>
+    <label>我的轨 <select id="refTake"></select></label>
+  </div>
+  <div class="refrow">
+    <label>模式
+      <select id="refMode">
+        <option value="intonation" selected>只修音准(保持我的调)</option>
+        <option value="match">完全跟原唱</option>
+      </select>
+    </label>
+    <label>收多少
+      <input id="refStrength" type="range" min="0.3" max="1" step="0.05" value="0.9">
+      <span id="refStrengthV">90%</span>
+    </label>
+    <button id="refGo" class="btn">分析</button>
+    <button id="refId" class="mini" title="拿你这条轨去歌库里认歌:认出来就自动选好原唱轨">认歌</button>
+    <button id="refImport" class="mini" title="选一个原唱文件(带伴奏的整曲也行):导入成一条轨,并自动选成「原唱轨」">导入原唱…</button>
+  </div>
+  <div id="refLib" class="refrow"></div>
+  <input id="refFile" type="file" accept=".wav,.mp3,.flac,.ogg" hidden>
+  <div id="refMeasure" class="automeas"></div>
+  <canvas id="refGraph" height="110"></canvas>
+  <div id="refBody" class="autobody"></div>
+  <div id="refNotes" class="autonotes"></div>
+  <div class="autofoot">
+    <button id="refSelAll" class="mini">全选</button>
+    <button id="refSelNone" class="mini">全不选</button>
+    <span class="grow"></span>
+    <button id="refCancel" class="mini">取消</button>
+    <button id="refApply" class="btn">应用</button>
+  </div>
+</div>
+
+<div id="voicePanel" class="autopanel" hidden>
+  <div class="autohead">
+    <b>🎙 我的声音</b>
+    <span class="inote">云端训练的个人音色模型 · 补音时用</span>
+    <span class="grow"></span>
+    <button id="voiceClose" class="mini" title="关掉">×</button>
+  </div>
+  <div class="refrow">
+    <label>地址 <input id="voiceUrl" type="text" spellcheck="false"
+      placeholder="http://1.2.3.4:8000" style="width:230px"></label>
+    <label class="chk"><input type="checkbox" id="voiceEnabled" checked> 启用云端</label>
+  </div>
+  <div class="refrow">
+    <label>token <input id="voiceToken" type="password" spellcheck="false"
+      placeholder="留空 = 不改" style="width:230px"></label>
+    <button id="voiceSave" class="mini">保存</button>
+    <button id="voiceClear" class="mini" title="只清 token,地址留着">清除 token</button>
+    <button id="voiceTest" class="mini">测试连接</button>
+  </div>
+  <div id="voiceState" class="automeas"></div>
+  <div id="voiceBody" class="autobody"></div>
+  <div class="autonotes">补音只把<b>选中的那一段</b>(最多 15 秒)发到你自己配置的云服务器;
+    不发工程、不发文件名、不发整首歌。云端连不上会自动用本地补音,不会卡住。</div>
+</div>
+
+<div id="extPanel" class="autopanel" hidden>
+  <div class="autohead">
+    <b>🎙 补音</b>
+    <span class="inote" id="extHead">把这一段延长/缩短</span>
+    <span class="grow"></span>
+    <button id="extClose" class="mini" title="关掉,什么都不改">×</button>
+  </div>
+  <div class="refrow">
+    <label>源长 <b id="extSrcLen">—</b></label>
+    <label>目标 <input id="extTarget" type="number" min="0.05" step="0.01"
+      style="width:82px"><span class="v">秒</span></label>
+    <label>倍数 <span id="extRatio">1.00×</span></label>
+  </div>
+  <div class="refrow">
+    <button class="mini extq" data-x="0.5">0.5×</button>
+    <button class="mini extq" data-x="1.5">1.5×</button>
+    <button class="mini extq" data-x="2">2×</button>
+    <button class="mini extq" data-x="4">4×</button>
+    <button class="mini extq" data-x="8">8×</button>
+    <label class="chk"><input type="checkbox" id="extLocal"> 只用本地(不发云端)</label>
+  </div>
+  <div id="extBody" class="autobody"></div>
+  <div class="autonotes" id="extNotes">只发选中的这一段;0.3×–8× 内最稳,极端倍数会有颗粒感。</div>
+  <div class="autofoot">
+    <span class="grow"></span>
+    <button id="extCancel" class="mini">取消</button>
+    <button id="extGo" class="btn">生成</button>
+    <button id="extApply" class="btn" disabled>应用</button>
+  </div>
+</div>
+
+<div id="nlPanel" class="autopanel" hidden>
+  <div class="autohead">
+    <b>💬 调音助手</b>
+    <span class="inote">说听感,AI 改成参数 · 只出方案,你勾了才改</span>
+    <span class="grow"></span>
+    <button id="nlClose" class="mini" title="关掉,什么都不改">×</button>
+  </div>
+  <div class="refrow">
+    <label>范围
+      <select id="nlScope">
+        <option value="project">整曲</option>
+        <option value="track">选中轨</option>
+        <option value="clips">选中块</option>
+      </select>
+    </label>
+    <label class="chk" title="默认不发轨道名(换成「主唱/伴奏/轨道 N」)"><input type="checkbox" id="nlSendNames"> 允许发送轨道名</label>
+  </div>
+  <div class="refrow">
+    <input id="nlText" type="text" spellcheck="false" style="flex:1;min-width:220px"
+      placeholder="人声太干,加一点混响">
+    <button id="nlGo" class="btn">理解</button>
+  </div>
+  <div id="nlKeyRow" class="refrow" hidden>
+    <label>DeepSeek key <input id="nlKey" type="password" style="width:190px" placeholder="sk-…"></label>
+    <button id="nlKeySave" class="mini">保存</button>
+    <span class="inote">只存本机服务端</span>
+  </div>
+  <div id="nlState" class="automeas"></div>
+  <div id="nlBody" class="autobody"></div>
+  <div id="nlNotes" class="autonotes">本次只发送参数和你这句话,不发音频、不发文件名、不发工程名。</div>
+  <div class="autofoot">
+    <span class="grow"></span>
+    <button id="nlCancel" class="mini">取消</button>
+    <button id="nlApply" class="btn" disabled>应用</button>
+  </div>
+</div>
+
+<div id="bigEdit" hidden>
+  <header id="bigHead">
+    <b>块编辑</b>
+    <select id="bigTrack" title="要编哪一条轨"></select>
+    <span class="seg" id="bigViewSeg">
+      <button id="bigViewBlocks" class="mini on" title="按块摆位置(拖 = 移动,两边 = 改长度)">块</button>
+      <button id="bigViewPitch" class="mini" title="上下拖音高(半音吸附;按住 Alt 按音分)">音高</button>
+    </span>
+    <button id="bigPen" class="mini" hidden title="在选中的音里画修正曲线(20ms 一点,最多 ±200 音分)">改曲线</button>
+    <button id="bigFlat" class="mini" hidden title="把选中的音的曲线拉平到 0(就唱在这个音上)">拉平</button>
+    <button id="bigClrCurve" class="mini" hidden title="删掉曲线,回到原始音高">清曲线</button>
+    <button id="bigRefBtn" class="mini" hidden title="拿原唱当参照:只画目标线,只修你选中的音">原唱</button>
+    <button id="bigExtend" class="mini" title="把选中的音延长/缩短(生成一段新音频,可听可撤)">补音…</button>
+    <button id="bigPlay" class="mini" title="播放 / 暂停 (空格)">▶ 播放</button>
+    <button id="bigFit" class="mini" title="缩放到能看见这一轨的全部块">全览</button>
+    <button id="bigZoomOut" class="mini">–</button>
+    <button id="bigZoomIn" class="mini">+</button>
+    <span id="bigInfo" class="inote"></span>
+    <span class="grow"></span>
+    <span class="inote" id="bigHint">拖 = 移动 · 拖两边 = 改长度 · 双击 = 切开 · Delete = 删(原地留空) · Ctrl+Z 撤销</span>
+    <button id="bigClose" class="mini danger" title="关掉(改动已经在这个工程里)">×</button>
+  </header>
+  <div id="bigRefBar" hidden>
+    <label>原唱轨 <select id="bigRefTrack"></select></label>
+    <label>模式
+      <select id="bigRefMode">
+        <option value="intonation" selected>只修音准(保持我的调)</option>
+        <option value="match">完全跟原唱</option>
+      </select>
+    </label>
+    <label>收多少
+      <input id="bigRefStrength" type="range" min="0.3" max="1" step="0.05" value="0.9">
+      <span id="bigRefStrengthV">90%</span>
+    </label>
+    <button id="bigRefGo" class="mini">分析</button>
+    <button id="bigRefImport" class="mini" title="直接选原唱文件:导入成一条轨并选成原唱轨">导入原唱…</button>
+    <label class="chk"><input type="checkbox" id="bigRefShow" checked> 显示原唱目标线</label>
+    <button id="bigRefApply" class="mini">按原唱修选中的音</button>
+    <span id="bigRefState" class="inote"></span>
+  </div>
+  <canvas id="bigCanvas"></canvas>
+</div>
+
+<script type="module" src="/static/studio/ui.js"></script>
+</body>
+</html>
