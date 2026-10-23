@@ -13,20 +13,31 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONPATH=/opt/rvc \
     PATH=/opt/venv/bin:$PATH
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# ★ apt 默认走 archive.ubuntu.com,从国内拉只有几十 KB/s —— 2026-10-22 实测
+#   `apt-get install build-essential` 跑了 20 分钟还没完。换成阿里云镜像后同一批包
+#   实测 16.7MB/s。注意:**只有 apt 能用阿里云,pip 不能**(见下面的源速记录)。
+# ★ 必须用 **http** 不能 https:基础镜像里还没有 ca-certificates,https 会在
+#   `apt-get update` 阶段就因为「Certificate verification failed」整条失败。
+#   apt 靠 InRelease 的 GPG 签名验包,走 http 不影响完整性。
+RUN sed -i 's|http://archive.ubuntu.com/ubuntu|http://mirrors.aliyun.com/ubuntu|g; s|http://security.ubuntu.com/ubuntu|http://mirrors.aliyun.com/ubuntu|g' \
+        /etc/apt/sources.list.d/ubuntu.sources \
+    && apt-get update && apt-get install -y --no-install-recommends \
         python3.12 python3.12-venv python3-pip \
         ffmpeg git libsndfile1 ca-certificates curl \
         build-essential \
     && rm -rf /var/lib/apt/lists/*
-
-RUN python3.12 -m venv /opt/venv \
-    && pip install --no-cache-dir -U pip wheel
 
 # 国内直连:RVC 依赖文件里写死的 pku 源在构建时经常超时,构建里 sed 掉。
 # ★ 源速实测(同一台机):
 #   USTC 23.9MB/s、腾讯云 17.1、华为云 10.6、清华 2.0、阿里云 0.10。
 #   阿里云对 pip 的下载限得离谱,别用;默认走 USTC。
 ARG PIP_INDEX=https://mirrors.ustc.edu.cn/pypi/simple
+
+# ★ 这一行也必须给 `-i`:不给就走默认的 pypi.org,国内实测只有 27KB/s,
+#   2026-10-22 在这里卡了两分多钟一个 1.8MB 的 pip 轮子都没下完。
+RUN python3.12 -m venv /opt/venv \
+    && pip install --no-cache-dir -U pip wheel -i "$PIP_INDEX"
+
 # ★ RVC 那份依赖文件是**按 CUDA 11.8 验过的**:它钉死 nvidia-cudnn-cu11==8.9.5.29
 #   这类 cu11 DLL(onnxruntime-gpu 1.18 要 cuDNN 8,和 cu12 的 torch 不同代)。
 #   USTC 上没有 8.9.5.29(只有 .30),所以留 pku 做兜底索引。

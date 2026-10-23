@@ -18,6 +18,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import subprocess
 import sys
 import time
@@ -49,7 +50,7 @@ class RefError(Exception):
     """给用户看的错(接口直接回 400)。"""
 
 
-MSG_DEMUCS = ("没装 demucs。装法:`D:\\AI\\python.exe -m pip install demucs`"
+MSG_DEMUCS = ("没装 demucs。装法:`python -m pip install demucs`"
               "(会拉 PyTorch,约 1~2GB;CPU 上一首 3 分钟的歌大概 5~20 分钟)")
 
 
@@ -794,3 +795,62 @@ def separate_vocals(path: Path, out_dir: Path, timeout: int = 1800) -> dict:
         raise RefError("Demucs 跑完了但没找到输出文件")
     return {"vocals": str(v), "instrumental": str(nv), "cached": False,
             "sec_cost": round(time.time() - t0, 1)}
+
+
+STEMS4 = ("drums", "bass", "other", "vocals")
+STEMS6 = ("drums", "bass", "other", "vocals", "guitar", "piano")
+
+# 档位 -> (demucs 模型名, 轨名列表)。★ 模型名必须和 `-n` 一致,缓存目录靠它认。
+STEM_MODELS = {
+    "4": ("htdemucs", STEMS4),
+    "6": ("htdemucs_6s", STEMS6),
+}
+
+
+def separate_stems(path: Path, out_dir: Path, timeout: int = 3600,
+                   model: str = "4") -> dict:
+    """多轨分离:四轨(鼓/贝斯/其他/人声)或六轨(多出吉他/钢琴)。
+
+    ★ 和 separate_vocals 的区别只在命令行:不加 `--two-stems`,Demucs 就按
+      完整的多轨模型跑一遍。CPU 上比两轨**贵不了多少**
+      (同一张网络,多出来的只是最后几次波形相加),但拿到的东西完全不同——
+      「自己再调」得有独立的一轨鼓、一轨贝斯才调得动。
+
+    ★ 六轨就是 Demucs 的**上限**,不是「想拆多细都行」:
+      吉他/钢琴只在它们真的占主导时才分得出来,电钢琴、合成器、弦乐通常落在
+      「其他」里;再往下拆「底鼓/军鼓/镲片」做不到(数学上就分不开)。
+    """
+    ok, why = demucs_available()
+    if not ok:
+        raise RefError(f"{MSG_DEMUCS}({why})")
+    key = "6" if str(model) == "6" else "4"
+    net, names = STEM_MODELS[key]
+    path = Path(path).resolve()
+    if not path.exists():
+        raise RefError(f"找不到音频文件:{path.name}")
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    base = out_dir / net / path.stem
+    outs = {k: base / f"{k}.wav" for k in names}
+    if all(p.exists() for p in outs.values()):
+        return {**{k: str(v) for k, v in outs.items()}, "cached": True, "model": key}
+
+    t0 = time.time()
+    # ★ 六轨模型的 yaml 要现拉,走的是 HuggingFace;国内直连会卡在重试里出不来。
+    #   带上镜像(模型已在本地缓存时这一步会被跳过,不影响四轨)。
+    env = dict(os.environ)
+    env.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+    cmd = [sys.executable, "-m", "demucs", "-n", net,
+           "-o", str(out_dir), str(path)]
+    try:
+        p = subprocess.run(cmd, capture_output=True, timeout=timeout, env=env)
+    except subprocess.TimeoutExpired:
+        raise RefError(f"Demucs 超时({timeout}s)。这个长度在 CPU 上太久,先剪短一点")
+    if p.returncode != 0:
+        tail = (p.stderr or b"").decode("utf-8", "replace").strip().splitlines()[-6:]
+        raise RefError("Demucs 失败:" + (" / ".join(tail) or f"退出码 {p.returncode}"))
+    missing = [k for k, v in outs.items() if not v.exists()]
+    if missing:
+        raise RefError("Demucs 跑完了但这些轨没出来:" + "、".join(missing))
+    return {**{k: str(v) for k, v in outs.items()}, "cached": False,
+            "sec_cost": round(time.time() - t0, 1), "model": key}

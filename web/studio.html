@@ -5,16 +5,19 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#0b0d12">
 <link rel="icon" href="data:,">
-<title>SingMic Studio</title>
-<link rel="stylesheet" href="/static/studio.css?v=3">
-<!-- 自己画的霓虹指针:全局一个,十字/抓手/输入框那些也一并盖掉 -->
+<title>声麦 Studio Pro</title>
+<link rel="stylesheet" href="/static/studio.css?v=10">
+<!-- 自己画的霓虹指针：全局一个，十字/抓手/输入框那些也一并盖掉 -->
 <script src="/static/pointer.js?v=6" defer></script>
 </head>
 <body>
 
 <header id="top">
-  <a class="back" href="/" title="回控制台">←</a>
-  <button id="btnPlay" class="tp" title="播放 / 暂停 (空格)">▶</button>
+  <!-- ★ 左上角的 ESC 键：每按一下退回上一级（面板 → 整页块编辑 → 引导），
+       退无可退时弹「是否退出应用」。键盘上的 Esc 与它走同一套逻辑。 -->
+  <button id="btnEsc" class="esckey" type="button"
+          title="返回上一级；已在顶层时退出应用（Esc）">ESC</button>
+  <button id="btnPlay" class="tp" title="播放 / 暂停 （空格）">▶</button>
   <button id="btnStop" class="tp" title="停止 (Home 回开头)">■</button>
   <label class="chk"><input type="checkbox" id="chkLoop"> 循环</label>
   <span id="clock">001:01:000</span>
@@ -44,42 +47,49 @@
   <button id="btnZoomIn" class="mini">+</button>
   <span class="sep"></span>
   <span id="saveState">已保存</span>
-  <label class="fld" title="母带响度:BS.1770 归一 + 5ms 前瞻限幅">响度
+  <label class="fld" title="母带响度：BS.1770 归一 + 5ms 前瞻限幅">响度
     <select id="selLoud">
       <option value="-14" selected>-14 LUFS</option>
       <option value="-9">-9 LUFS</option>
       <option value="off">关</option>
     </select>
   </label>
-  <button id="btnAuto" class="mini" title="本机测量响度/峰值/频段/跑调,给出一份可勾选的调整方案(不上传)">✨ 一键调音</button>
-  <button id="btnRef" class="mini" title="拿原唱人声当参照,把你唱跑的地方收回去(本机分析,不上传)">🎤 跟原唱</button>
-  <button id="btnVoice" class="mini" title="云端的个人音色模型:延长/缩短时更接近你的声音(本地补音不需要它)">🎙 我的声音</button>
-  <button id="btnNL" class="mini" title="用一句话说听感,让 AI 改成参数(只发参数和你这句话)">💬 调音助手</button>
+  <button id="btnAuto" class="mini" title="本机测量响度、峰值、频段与音高偏差，输出可勾选的调整方案（不上传）">✨ 一键调音</button>
+  <button id="btnRef" class="mini" title="以原唱人声为参照，修正音高偏差（本机分析，不上传）">🎤 跟原唱</button>
+  <button id="btnVoice" class="mini" title="云端个人音色模型：延长或缩短时更接近本人音色（本地补音无需使用）">🎙 我的声音</button>
+  <button id="btnNL" class="mini" title="用一句话描述听感，由 AI 转换为参数（仅发送参数与该描述）">💬 调音助手</button>
+  <button id="btnGen" class="mini" title="由云端 AI 生成伴奏（仅发送风格描述与歌词，不发送录音）">🎵 AI 伴奏</button>
+  <button id="btnDrum" class="mini" title="加一条鼓轨：底鼓/军鼓/拍手/镲/牛铃，在下面卷帘里一格一格点">🥁 鼓机</button>
   <button id="btnExport" class="mini">导出</button>
-  <button id="btnStems" class="mini" title="导出分轨 ZIP(给 FL / 别的 DAW);按住 Alt = 插件链之后">分轨</button>
+  <button id="btnStems" class="mini" title="导出分轨 ZIP（供 FL 或其他 DAW 使用）；按住 Alt = 应用插件链之后">分轨</button>
+  <button id="btnSettings" class="mini gearbtn" title="设置：帮助与反馈 / 关于声麦 Studio Pro" aria-label="设置">
+    <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" focusable="false">
+      <path fill="currentColor" d="M19.14 12.94c.04-.3.06-.61.06-.94s-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96a7.03 7.03 0 0 0-1.62-.94l-.36-2.54a.48.48 0 0 0-.48-.41h-3.84a.48.48 0 0 0-.48.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.48.48 0 0 0-.59.22L2.73 8.87a.48.48 0 0 0 .12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.48-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32a.49.49 0 0 0-.12-.61l-2.01-1.58ZM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2Z"/>
+    </svg>
+  </button>
 </header>
 
 <main>
   <aside id="browser">
     <div class="bhead">
       <input id="projName" value="未命名" spellcheck="false">
-      <button id="btnAddTrack" class="mini" title="加一条空轨;双击混音台上的轨名可以改名">＋轨</button>
+      <button id="btnAddTrack" class="mini" title="新增一条空轨；双击混音台轨道名可重命名">＋轨</button>
       <button id="btnNew" class="mini" title="新建工程">新建</button>
-      <button id="btnCache" class="mini" title="渲染缓存占用 · 点一下清理没被引用的">缓存</button>
+      <button id="btnCache" class="mini" title="渲染缓存占用 · 点击清理未被引用的缓存">缓存</button>
     </div>
     <div class="bhead">
       <select id="projList" title="切换工程"></select>
-      <button id="btnDelProj" class="mini danger" title="删掉当前选中的工程(只删工程文件;媒体库里的音频不动)">删工程</button>
-      <button id="btnQuant" class="mini" title="选中的块吸到最近网格(只挪起点,不渲染)">对拍</button>
-      <button id="btnBig" class="mini" title="整页块编辑:把这一轨的块排成一整条,拖动/改长/删/切开">块编辑</button>
-      <button id="btnPitch" class="mini" title="标出跑调的块(只标,改不改你点)">跑调</button>
-      <button id="btnChords" class="mini" title="测和弦(★ 有人声鼓点会错,只用来建议和声)">和弦</button>
+      <button id="btnDelProj" class="mini danger" title="删掉当前选中的工程（只删工程文件；媒体库里的音频不动）">删工程</button>
+      <button id="btnQuant" class="mini" title="选中的块吸到最近网格（只挪起点，不渲染）">对拍</button>
+      <button id="btnBig" class="mini" title="整页块编辑：将当前轨道的块排成一整条，可拖动、改长、删除与切开">块编辑</button>
+      <button id="btnPitch" class="mini" title="标出音高偏差的块（仅标注，由用户决定是否修改）">跑调</button>
+      <button id="btnChords" class="mini" title="检测和弦（★ 含人声与鼓点时可能不准，仅用于和声建议）">和弦</button>
     </div>
     <div id="pitchMsg" class="pmsg" hidden></div>
 
     <div class="bsec">
       <div class="btitle">录音 <span id="recCount"></span>
-        <button id="btnRecRefresh" class="mini" title="刚在手机上录完?点这里刷新列表">刷新</button>
+        <button id="btnRecRefresh" class="mini" title="刚刚在手机上完成录音后，点击此处刷新列表">刷新</button>
       </div>
       <div id="recList" class="blist"></div>
     </div>
@@ -94,16 +104,16 @@
 
     <div class="bsec" id="secBlocks" hidden>
       <div class="btitle">切好的块 <span id="blockInfo"></span>
-        <select id="blockMode" class="mini" title="切法:按字/音节,或者按音高逐音">
+        <select id="blockMode" class="mini" title="切法：按字/音节，或者按音高逐音">
           <option value="syllable">按字/音节</option>
-          <option value="note">按音(逐音)</option>
+          <option value="note">按音（逐音）</option>
         </select>
-        <label id="blockAsrWrap" class="mini asrchk" title="用语音识别给块标上字/词(只标文字,不改切法)">
+        <label id="blockAsrWrap" class="mini asrchk" title="使用语音识别为块标注文字（仅标注文字，不改变切分方式）">
           <input id="blockAsr" type="checkbox" checked> 识别
         </label>
         <button id="btnAsrDownload" class="mini" hidden
-                title="下载中文和英文识别模型(约 190MB,只下一次)">下载识别模型</button>
-        <button id="btnBlocksAll" class="mini" title="把这条录音的所有块铺成一条轨,整页编辑">整页编辑</button>
+                title="下载中文与英文识别模型（约 190 MB，仅需下载一次）">下载识别模型</button>
+        <button id="btnBlocksAll" class="mini" title="将本条录音的全部块铺设为一条轨，用于整页编辑">整页编辑</button>
       </div>
       <div id="blockList" class="blist"></div>
     </div>
@@ -111,9 +121,9 @@
     <div class="bnote">
       拖到右边摆位置 · 空格播放 · Delete 删 · Ctrl+Z 撤销<br>
       双击轨名改名 · 顶部「＋轨」加空轨<br>
-      ←→ 挪选中的块(Shift 10ms / Alt 1ms)<br>
+      ←→ 挪选中的块（Shift 10ms / Alt 1ms）<br>
       滚轮上下滚轨道 · Shift+滚轮横向走时间 · Ctrl+滚轮缩放<br>
-      ★ 原录音只读,改动都在工程里
+      ★ 原录音只读，改动都在工程里
     </div>
   </aside>
 
@@ -139,7 +149,7 @@
   </div>
   <div id="panelRoll" class="panel">
     <canvas id="rollCanvas"></canvas>
-    <div class="pnote">先建一条「采样」轨,才能在这里画音符(阶段 3)</div>
+    <div class="pnote">请先创建一条「采样」轨，方可在此处绘制音符（阶段 3）</div>
   </div>
   <div id="panelMix" class="panel" hidden>
     <div id="mixStrips"></div>
@@ -149,7 +159,7 @@
     <div class="fxshell">
       <div class="fxside">
         <div class="fxhead">
-          <span>插件链:</span><b id="fxTrackName">—</b>
+          <span>插件链：</span><b id="fxTrackName">—</b>
           <span id="fxOrder" class="inote">从上到下 = 处理顺序</span>
         </div>
         <div id="fxSlots" class="fxslots"></div>
@@ -157,7 +167,7 @@
           <select id="fxAddSel"></select>
           <button id="fxAddBtn" class="btn">＋ 添加插件</button>
         </div>
-        <div class="pnote">插件只作用于这一轨;导出时会按同一顺序重算。</div>
+        <div class="pnote">插件仅作用于当前轨道；导出时将按相同顺序重新计算。</div>
       </div>
       <div id="fxParams" class="fxparams">
         <div class="inote">选一个插件看参数</div>
@@ -179,7 +189,7 @@
           <button id="vstAddBtn" class="btn">＋ 添加 VST</button>
           <button id="vstScanBtn" class="btn" title="重新扫描插件文件夹">刷新</button>
         </div>
-        <div class="vstnote" title="VST 由本地进程离线计算,浏览器跑不了。把 .vst3 解压/复制到上面的文件夹再点「刷新」;加进来后打开「冻结」,正常播放才能听到它。">
+        <div class="vstnote" title="VST 由本地进程离线计算，浏览器端无法运行。请将 .vst3 复制到上方目录后点击「刷新」；添加后需开启「冻结」，正常播放时才会生效。">
           ★ <strong>离线</strong>计算 · 解压 <code>.vst3</code> 到上面文件夹 → 刷新 · 开「冻结」才听得到
         </div>
       </div>
@@ -191,11 +201,11 @@
       <label class="chk"><input type="checkbox" id="vstFreeze"> 冻结这一轨</label>
       <span id="vstFreezeState" class="vststate"></span>
       <span class="grow"></span>
-      <button id="vstAudBtn" class="btn">▶ 试听这一段(循环)</button>
-      <button id="vstDryBtn" class="btn" title="同一段再渲染一次,把 VST 拿掉">听干声 A/B</button>
+      <button id="vstAudBtn" class="btn">▶ 试听这一段（循环）</button>
+      <button id="vstDryBtn" class="btn" title="同一段再渲染一次，把 VST 拿掉">听干声 A/B</button>
       <span id="vstLat" class="inote"></span>
       <span class="sep"></span>
-      <button id="vstPrevBtn" class="btn" title="走导出那条路径渲染整曲,听最终结果">▶ 渲染试听整曲</button>
+      <button id="vstPrevBtn" class="btn" title="通过导出流程渲染整曲，用于试听最终结果">▶ 渲染试听整曲</button>
       <span id="vstPrevState" class="inote"></span>
       <audio id="vstPrev" controls hidden style="height:28px"></audio>
     </div>
@@ -207,7 +217,7 @@
     <b>✨ 一键调音</b>
     <span class="inote">本机测量 · 不上传 · 只出方案</span>
     <span class="grow"></span>
-    <button id="autoClose" class="mini" title="关掉,什么都不改">×</button>
+    <button id="autoClose" class="mini" title="关掉，什么都不改">×</button>
   </div>
   <div id="autoMeasure" class="automeas"></div>
   <div id="autoBody" class="autobody"></div>
@@ -229,7 +239,7 @@
     <b>🎤 跟原唱矫正</b>
     <span class="inote">本机 YIN 测音高 · 不上传</span>
     <span class="grow"></span>
-    <button id="refClose" class="mini" title="关掉,什么都不改">×</button>
+    <button id="refClose" class="mini" title="关掉，什么都不改">×</button>
   </div>
   <div class="refrow">
     <label>原唱轨 <select id="refRef"></select></label>
@@ -238,7 +248,7 @@
   <div class="refrow">
     <label>模式
       <select id="refMode">
-        <option value="intonation" selected>只修音准(保持我的调)</option>
+        <option value="intonation" selected>只修音准（保持我的调）</option>
         <option value="match">完全跟原唱</option>
       </select>
     </label>
@@ -247,8 +257,8 @@
       <span id="refStrengthV">90%</span>
     </label>
     <button id="refGo" class="btn">分析</button>
-    <button id="refId" class="mini" title="拿你这条轨去歌库里认歌:认出来就自动选好原唱轨">认歌</button>
-    <button id="refImport" class="mini" title="选一个原唱文件(带伴奏的整曲也行):导入成一条轨,并自动选成「原唱轨」">导入原唱…</button>
+    <button id="refId" class="mini" title="使用当前轨道在歌库中识别歌曲；识别成功后将自动选定原唱轨">认歌</button>
+    <button id="refImport" class="mini" title="选择一个原唱文件（可为带伴奏的整曲）：导入为一条轨，并自动设为「原唱轨」">导入原唱…</button>
   </div>
   <div id="refLib" class="refrow"></div>
   <input id="refFile" type="file" accept=".wav,.mp3,.flac,.ogg" hidden>
@@ -281,13 +291,13 @@
     <label>token <input id="voiceToken" type="password" spellcheck="false"
       placeholder="留空 = 不改" style="width:230px"></label>
     <button id="voiceSave" class="mini">保存</button>
-    <button id="voiceClear" class="mini" title="只清 token,地址留着">清除 token</button>
+    <button id="voiceClear" class="mini" title="仅清除 token，保留服务地址">清除 token</button>
     <button id="voiceTest" class="mini">测试连接</button>
   </div>
   <div id="voiceState" class="automeas"></div>
   <div id="voiceBody" class="autobody"></div>
-  <div class="autonotes">补音只把<b>选中的那一段</b>(最多 15 秒)发到你自己配置的云服务器;
-    不发工程、不发文件名、不发整首歌。云端连不上会自动用本地补音,不会卡住。</div>
+  <div class="autonotes">补音仅发送<b>选中的片段</b>（最长 15 秒）至您自行配置的云服务器；
+    不发送工程、文件名或整首歌曲。云端不可达时自动回退本地补音，不会阻塞操作。</div>
 </div>
 
 <div id="extPanel" class="autopanel" hidden>
@@ -295,7 +305,7 @@
     <b>🎙 补音</b>
     <span class="inote" id="extHead">把这一段延长/缩短</span>
     <span class="grow"></span>
-    <button id="extClose" class="mini" title="关掉,什么都不改">×</button>
+    <button id="extClose" class="mini" title="关掉，什么都不改">×</button>
   </div>
   <div class="refrow">
     <label>源长 <b id="extSrcLen">—</b></label>
@@ -309,10 +319,10 @@
     <button class="mini extq" data-x="2">2×</button>
     <button class="mini extq" data-x="4">4×</button>
     <button class="mini extq" data-x="8">8×</button>
-    <label class="chk"><input type="checkbox" id="extLocal"> 只用本地(不发云端)</label>
+    <label class="chk"><input type="checkbox" id="extLocal"> 只用本地（不发云端）</label>
   </div>
   <div id="extBody" class="autobody"></div>
-  <div class="autonotes" id="extNotes">只发选中的这一段;0.3×–8× 内最稳,极端倍数会有颗粒感。</div>
+  <div class="autonotes" id="extNotes">仅发送选中的片段；0.3×–8× 范围内最稳定，极端倍数会产生颗粒感。</div>
   <div class="autofoot">
     <span class="grow"></span>
     <button id="extCancel" class="mini">取消</button>
@@ -324,9 +334,9 @@
 <div id="nlPanel" class="autopanel" hidden>
   <div class="autohead">
     <b>💬 调音助手</b>
-    <span class="inote">说听感,AI 改成参数 · 只出方案,你勾了才改</span>
+    <span class="inote">用自然语言描述听感，由 AI 转换为参数 · 仅生成方案，勾选后才应用</span>
     <span class="grow"></span>
-    <button id="nlClose" class="mini" title="关掉,什么都不改">×</button>
+    <button id="nlClose" class="mini" title="关掉，什么都不改">×</button>
   </div>
   <div class="refrow">
     <label>范围
@@ -336,11 +346,11 @@
         <option value="clips">选中块</option>
       </select>
     </label>
-    <label class="chk" title="默认不发轨道名(换成「主唱/伴奏/轨道 N」)"><input type="checkbox" id="nlSendNames"> 允许发送轨道名</label>
+    <label class="chk" title="默认不发轨道名（换成「主唱/伴奏/轨道 N」）"><input type="checkbox" id="nlSendNames"> 允许发送轨道名</label>
   </div>
   <div class="refrow">
     <input id="nlText" type="text" spellcheck="false" style="flex:1;min-width:220px"
-      placeholder="人声太干,加一点混响">
+      placeholder="人声偏干，增加少量混响">
     <button id="nlGo" class="btn">理解</button>
   </div>
   <div id="nlKeyRow" class="refrow" hidden>
@@ -350,11 +360,463 @@
   </div>
   <div id="nlState" class="automeas"></div>
   <div id="nlBody" class="autobody"></div>
-  <div id="nlNotes" class="autonotes">本次只发送参数和你这句话,不发音频、不发文件名、不发工程名。</div>
+  <div id="nlNotes" class="autonotes">本次仅发送参数与本条描述，不发送音频、文件名或工程名。</div>
   <div class="autofoot">
     <span class="grow"></span>
     <button id="nlCancel" class="mini">取消</button>
     <button id="nlApply" class="btn" disabled>应用</button>
+  </div>
+</div>
+
+<div id="genPanel" class="autopanel genpanel" hidden>
+  <div class="autohead">
+    <b>AI 生成歌曲 / 伴奏</b>
+    <span class="inote">给一句风格，云端生成；带 AI 人声要写歌词</span>
+    <span class="grow"></span>
+    <button id="genHelpBtn" class="mini" title="平台选择、费用说明与上传内容">说明</button>
+    <button id="genClose" class="mini" title="关掉">×</button>
+  </div>
+
+  <div class="genmain">
+    <!-- ---------- 左：平台与风格 ---------- -->
+    <div class="gencol">
+      <div class="gensec">平台</div>
+      <label class="genfld"><span>用哪个</span>
+        <select id="genProvider">
+          <option value="mureka">Mureka（一次充 200）</option>
+          <option value="bailian">阿里云百炼（按秒计费）</option>
+          <option value="tokenhub" title="实测仅支持「歌词生成歌曲」，输出为带 AI 人声的整首歌；如需伴奏，请使用「人声/伴奏」拆分">腾讯云 TokenHub（按首计费 · 仅输出带人声的整首）</option>
+        </select>
+      </label>
+      <label class="genfld"><span>模型</span>
+        <select id="genModel">
+          <option value="auto">自动</option>
+        </select>
+      </label>
+      <div id="genModelHint" class="genhint"></div>
+      <div id="genProvHint" class="genhint"></div>
+
+      <div id="genKeyRow" class="genkey">
+        <label class="genfld"><span>API key</span>
+          <input id="genKey" type="password" spellcheck="false" placeholder="平台提供的 API Key">
+        </label>
+        <div class="genkeybar">
+          <button id="genKeySave" class="mini">保存</button>
+          <button id="genKeyClear" class="mini" title="清除本机保存的 API Key">清除</button>
+        </div>
+      </div>
+
+      <div class="gensec">要什么</div>
+      <label class="chk genvox" title="勾选后才会实际调用平台并产生费用">
+        <input type="checkbox" id="genVocal"> 带 AI 人声（无需 AI 演唱时请取消勾选）
+      </label>
+      <label class="genfld"><span>声音</span>
+        <select id="genGender" title="百炼 fun-music 与腾讯云 mureka-music-v9 均支持选择男女声">
+          <option value="female">女声</option>
+          <option value="male">男声</option>
+        </select>
+      </label>
+
+      <div class="gensec">
+        风格 / 情绪 <span id="genPromptCount" class="gencount">0 / 1024</span>
+        <span class="grow"></span>
+        <button id="genLibOpen" class="mini accent" title="数十条组合模板，支持 30 秒试听">组合模板库</button>
+      </div>
+      <textarea id="genPrompt" class="genta" rows="5" spellcheck="false"
+        placeholder="phonk, 145 bpm, dark, 808 cowbell, heavy kick, 主歌贴脸、副歌加一层和声， 4/4 直拍"></textarea>
+
+      <!-- 常用组合模板：一次把「流派+情绪+乐器+人声特效+节奏」整套填好，省得一项项点。
+           内容来自 presets.js，面板这里只放「常用」那几条，全量在模板库里 -->
+      <div class="gtagrow">
+        <span class="gtaglab">组合模板</span>
+        <div id="genPresets" class="gchips"></div>
+      </div>
+
+      <!-- 单项：点一下接在风格说明后面，自己拼组合。默认收起 —— 面板上不糊一片 -->
+      <details id="genTags" class="gtags">
+        <summary>按单项加（流派 / 情绪 / 乐器 / 人声特效 / 节奏）</summary>
+      <div class="gtagrow">
+        <span class="gtaglab">流派</span>
+        <div id="genStyles" class="gchips">
+          <button class="gchip" data-style="pop, 100 bpm, 明亮， 钢琴 + 合成器 pad + 电吉他">流行</button>
+          <button class="gchip" data-style="R&amp;B / neo-soul, 82 bpm, 温暖， Rhodes 电钢 + 刷鼓">R&amp;B</button>
+          <button class="gchip" data-style="city pop, 108 bpm, 明亮， 放克贝斯 + 合唱效果吉他 + 80 年代合成器">City Pop</button>
+          <button class="gchip" data-style="华语抒情， 72 bpm, 钢琴 + 弦乐， 情绪化">抒情</button>
+          <button class="gchip" data-style="trap, 140 bpm, 暗， 808 低音 + hi-hat 三连滚">Trap</button>
+          <button class="gchip" data-style="摇滚， 128 bpm, 失真吉他 + 实录鼓， 有冲劲">摇滚</button>
+          <button class="gchip" data-style="民谣， 88 bpm, 木吉他 + 口琴， 干净">民谣</button>
+          <button class="gchip" data-style="EDM / future bass, 128 bpm, 合成器主音 + 厚重低频， 有 Drop">电子</button>
+          <button class="gchip" data-style="phonk, 145 bpm, 暗， 808 cowbell + 重底鼓">Phonk</button>
+          <button class="gchip" data-style="lo-fi, 75 bpm, 灰尘感， 黑胶底噪 + 闷电钢">Lo-fi</button>
+          <button class="gchip" data-style="爵士， 96 bpm, 摇摆， 钢琴三重奏 + 萨克斯">爵士</button>
+          <button class="gchip" data-style="bossa nova, 92 bpm, 尼龙吉他 + 轻打击乐， 慵懒">Bossa</button>
+          <button class="gchip" data-style="雷鬼， 76 bpm, 反拍吉他 + 弹性贝斯， 放松">雷鬼</button>
+          <button class="gchip" data-style="金属， 160 bpm, 双踩底鼓 + 降调吉他">金属</button>
+          <button class="gchip" data-style="福音 / gospel, 84 bpm, 风琴 + 大和声团， 明亮">福音</button>
+          <button class="gchip" data-style="管弦乐， 90 bpm, 弦乐 + 铜管 + 定音鼓， 史诗">管弦</button>
+        </div>
+      </div>
+      <div class="gtagrow">
+        <span class="gtaglab">情绪</span>
+        <div id="genMoods" class="gchips">
+          <button class="gchip" data-style="温暖、治愈">温暖</button>
+          <button class="gchip" data-style="emo、克制的失落">emo</button>
+          <button class="gchip" data-style="暗、压迫">暗黑</button>
+          <button class="gchip" data-style="明亮、开阔">明亮</button>
+          <button class="gchip" data-style="燃、有冲劲">燃</button>
+          <button class="gchip" data-style="慵懒、放松">慵懒</button>
+          <button class="gchip" data-style="怀旧、复古">怀旧</button>
+          <button class="gchip" data-style="孤独、空旷">孤独</button>
+          <button class="gchip" data-style="坚定、上行">坚定</button>
+          <button class="gchip" data-style="甜、轻快">甜</button>
+        </div>
+      </div>
+      <div class="gtagrow">
+        <span class="gtaglab">乐器</span>
+        <div id="genInstrs" class="gchips">
+          <button class="gchip" data-style="Rhodes 电钢">Rhodes 电钢</button>
+          <button class="gchip" data-style="木吉他指弹">木吉他</button>
+          <button class="gchip" data-style="弦乐四重奏">弦乐</button>
+          <button class="gchip" data-style="808 低音">808</button>
+          <button class="gchip" data-style="合成器 pad">Pad</button>
+          <button class="gchip" data-style="萨克斯">萨克斯</button>
+          <button class="gchip" data-style="古筝">古筝</button>
+          <button class="gchip" data-style="笛子">笛子</button>
+          <button class="gchip" data-style="口琴">口琴</button>
+          <button class="gchip" data-style="手风琴">手风琴</button>
+          <button class="gchip" data-style="风琴">风琴</button>
+          <button class="gchip" data-style="钢琴">钢琴</button>
+        </div>
+      </div>
+      <div class="gtagrow">
+        <span class="gtaglab">人声特效</span>
+        <div id="genVocals" class="gchips">
+          <button class="gchip" data-style="人声贴脸、干声多一点">贴脸</button>
+          <button class="gchip" data-style="气声多、尾音虚">气声</button>
+          <button class="gchip" data-style="耳语般的人声， 很轻很近">耳语音色</button>
+          <button class="gchip" data-style="双轨叠唱， 左右微差">双轨叠唱</button>
+          <button class="gchip" data-style="副歌叠三层和声">和声堆叠</button>
+          <button class="gchip" data-style="人声过电话音、窄频带">电话音</button>
+          <button class="gchip" data-style="人声做机器人化、声码器">机器人声</button>
+          <button class="gchip" data-style="人声轻微失真、过载">失真人声</button>
+          <button class="gchip" data-style="自动修音硬调、音高阶梯感">硬修音</button>
+          <button class="gchip" data-style="背景加唱诗班">唱诗班</button>
+          <button class="gchip" data-style="段落之间加 ad-lib 和低语">Ad-lib</button>
+          <button class="gchip" data-style="人声加短延迟、拍点回声">短延迟</button>
+        </div>
+      </div>
+      <div class="gtagrow">
+        <span class="gtaglab">节奏</span>
+        <div id="genGrooves" class="gchips">
+          <button class="gchip" data-style="4/4 直拍， 底鼓踩点">直拍</button>
+          <button class="gchip" data-style="swing 摇摆 12%">摇摆</button>
+          <button class="gchip" data-style="half-time 半速鼓">半速</button>
+          <button class="gchip" data-style="four-on-the-floor 四踩底鼓">四踩</button>
+          <button class="gchip" data-style="切分节奏、反拍重音">切分</button>
+          <button class="gchip" data-style="bossa 律动， 轻推后半拍">Bossa</button>
+          <button class="gchip" data-style="鼓组加滚奏过门">滚奏</button>
+          <button class="gchip" data-style="副歌前收掉底鼓做 build-up">Build-up</button>
+          <button class="gchip" data-style="6/8 拍， 三拍子摇曳">6/8 拍</button>
+        </div>
+      </div>
+      </details>
+    </div>
+
+    <!-- ---------- 右：结构 + 歌词 ---------- -->
+    <div class="gencol">
+      <div class="gensec">
+        歌曲结构 <span id="genFormLen" class="gencount"></span>
+        <span class="grow"></span>
+        <button id="genFormApply" class="mini" title="按此结构将段落标签写入歌词（空段留待填写）">套用到歌词</button>
+      </div>
+      <label class="genfld"><span>模板</span>
+        <select id="genForm">
+          <option value="pop">流行 · 主歌-副歌</option>
+          <option value="ballad">华语抒情 · 慢板</option>
+          <option value="rnb">R&amp;B / Neo-Soul</option>
+          <option value="rap">说唱 / Hip-Hop</option>
+          <option value="rapfull">说唱 · 多段 Rap + 记忆点</option>
+          <option value="story">叙事 · 独白开场</option>
+          <option value="whisper">耳语 / 气声</option>
+          <option value="live">现场 · 人群声</option>
+          <option value="solo">器乐 · 独奏为主</option>
+          <option value="edm">电子 / EDM（有 Drop）</option>
+          <option value="rock">摇滚（带独奏）</option>
+          <option value="folk">民谣</option>
+          <option value="citypop">城市流行 City Pop</option>
+          <option value="guofeng">古风 / 中国风</option>
+          <option value="lofi">Lo-fi / Chill</option>
+          <option value="cinematic">影视 / 配乐（纯器乐）</option>
+          <option value="short">短版 · 主歌+副歌</option>
+          <option value="custom">自定义（可写小节数）</option>
+        </select>
+      </label>
+      <!-- 自定义：先按参数搭（前奏秒数 / 主歌段数 / 副歌遍数 / 间奏 / 尾奏秒数）,
+           参数搭不出来的复杂结构再写在下面的文字框里 —— 写了文字就以文字为准 -->
+      <div id="genFormParams" class="gparams" hidden>
+        <label class="gp"><span>前奏</span>
+          <input id="gpIntro" type="number" min="0" max="30" step="1" value="8"><i>秒</i></label>
+        <label class="gp"><span>主歌</span>
+          <input id="gpVerse" type="number" min="1" max="3" step="1" value="2"><i>段</i></label>
+        <label class="gp"><span>副歌</span>
+          <input id="gpChorus" type="number" min="1" max="4" step="1" value="2"><i>遍</i></label>
+        <label class="gp chk"><input id="gpInter" type="checkbox"> 间奏</label>
+        <label class="gp"><span>尾奏</span>
+          <input id="gpOutro" type="number" min="0" max="30" step="1" value="8"><i>秒</i></label>
+      </div>
+      <input id="genFormCustom" class="genin" type="text" spellcheck="false" hidden
+        placeholder="或直接填写段落名称：Intro 4, Verse 1 8, Chorus 8, Bridge 4, Chorus 16, Outro 4">
+      <div id="genFormMap" class="gformmap"></div>
+      <div id="genFormChips" class="gform"></div>
+      <!-- 插到光标处：这些不是「整段结构」，而是某一小段怎么唱/怎么处理 -->
+      <div class="gtagrow">
+        <span class="gtaglab">插到歌词</span>
+        <div id="genFxChips" class="gchips">
+          <button class="gchip" data-sec="Rap" title="这一段改成说唱">说唱段</button>
+          <button class="gchip" data-sec="Solo" title="这里给乐器独奏">独奏</button>
+          <button class="gchip" data-sec="Whisper" title="这一段用耳语唱">耳语</button>
+          <button class="gchip" data-sec="Spoken" title="这一段是独白 / 念白">独白</button>
+          <button class="gchip" data-sec="Robot Voice" title="这一段人声做机器人化">机器人声音</button>
+          <button class="gchip" data-sec="Telephone" title="这一段过电话音">电话音</button>
+          <button class="gchip" data-sec="Tape Hiss" title="这一段只留磁带底噪">磁带底噪</button>
+          <button class="gchip" data-sec="Crowd" title="这一段加人群声 / 现场声">人群声音</button>
+          <button class="gchip" data-sec="Choir" title="这一段加合唱">合唱</button>
+          <button class="gchip" data-sec="Ad-lib" title="这一段加即兴呼应">即兴</button>
+          <button class="gchip" data-sec="Hook" title="记忆点 / 重复句">记忆点</button>
+          <button class="gchip" data-sec="Break" title="断拍 / 全停">断拍</button>
+        </div>
+      </div>
+
+      <div class="gensec">
+        歌词 <span id="genLyricsCount" class="gencount">0 / 5000</span>
+        <span class="grow"></span>
+        <button id="genLyricsClear" class="mini" title="清空歌词">清空</button>
+      </div>
+      <textarea id="genLyrics" class="genta genlyr" spellcheck="false" disabled
+        placeholder="仅在勾选「带 AI 人声」时需要。每行一句，可用 [Verse]、[Chorus] 标注段落"></textarea>
+      <div id="genLyricsHint" class="genhint"></div>
+    </div>
+  </div>
+
+  <div id="genState" class="automeas"></div>
+  <div id="genBody" class="autobody"></div>
+
+  <div class="genfoot">
+    <span id="genCost" class="gencost"></span>
+    <span class="grow"></span>
+    <button id="genTest" class="mini" title="零费用：本地鼓组与系统语音朗读歌词，合成一首带人声的歌曲；完整流程（含「人声/伴奏」拆分）均可实际运行">试跑（免费）</button>
+    <button id="genGo" class="btn">生成</button>
+  </div>
+
+  <!-- 说明页：所有「旁边的解释」都收在这里，面板上只留控件和当场有用的提示 -->
+  <div id="genHelp" class="helpwrap" hidden>
+    <div class="libhead">
+      <b>AI 生成 · 说明</b>
+      <span class="libsub">平台 / 费用 / 模型 / 结构 / 试听 / 隐私</span>
+      <span class="grow"></span>
+      <button id="genHelpClose" class="mini">×</button>
+    </div>
+    <div class="helpbody">
+      <section>
+        <h3>整首生成的使用方法</h3>
+        <p>勾选「带 AI 人声」并填写歌词后，生成结果为<b>完整歌曲</b>，并非逐小节拼接。
+          生成完成后点击「人声/伴奏」拆分为两条轨：<b>伴奏保留用于自行演唱</b>；
+          AI 人声轨可作为原唱参照（点击「🎤 跟原唱」，将原唱轨设为该轨，再按音高差异修正）。</p>
+      </section>
+      <section>
+        <h3>三个平台的差异</h3>
+        <ul>
+          <li><b>Mureka</b> —— 单次充值 200 元，按首扣费（歌词生曲约 ¥0.33/首），支持纯伴奏与整首。</li>
+          <li><b>阿里云百炼</b> —— 按音频时长计费 <b>¥0.002/秒</b>，三分钟约 ¥0.4；开通免费，无需预充值，
+            但需在控制台「模型广场」为 fun-music 开通。
+            ★<b>带人声时仅使用歌词，风格说明将被忽略</b>；歌词 5–350 字。</li>
+          <li><b>腾讯云 TokenHub</b> —— <b>¥0.33/首</b>（33,000 tokens/首，与歌曲时长无关）。
+            ★<b>实测仅支持「歌词生成歌曲」</b>，不支持纯伴奏，因此必须勾选「带 AI 人声」。
+            输出末尾包含 <b>5 秒官方水印</b>（无法关闭）；音频地址 12 小时后失效，需保留时请点击「放到轨道」。</li>
+        </ul>
+      </section>
+      <section>
+        <h3>模型选择</h3>
+        <ul>
+          <li><b>自动</b> —— 使用平台默认设置，通常为当前旗舰模型。</li>
+          <li><b>mureka-9</b> —— 旗舰：先规划整首结构再生成音频，复杂段落提示效果最佳。★不支持纯伴奏。</li>
+          <li><b>mureka-o2</b> —— 侧重推理，句间衔接更连贯。★不支持纯伴奏。</li>
+          <li><b>mureka-7.6</b> —— 上一代模型，成本较低、生成较快，结构控制弱于 V9。</li>
+          <li><b>mureka-7.5</b> —— 纯音乐 / BGM 专用模型，伴奏更干净。<b>未实测</b>。</li>
+          <li><b>mureka-8</b> —— 2026-03 上线，尚未实测；选择后会先触发一次平台校验，
+            校验失败不产生费用，改回「自动」即可。<b>未实测</b>。</li>
+          <li><b>fun-music-v1</b>（百炼）—— 带人声时仅使用歌词，风格说明被忽略。</li>
+          <li><b>mureka-music-v9</b>（腾讯云）—— 实测仅支持「歌词生成歌曲」。</li>
+        </ul>
+      </section>
+      <section>
+        <h3>风格说明的写法</h3>
+        <p>该说明作为制作简报直接提交给模型，按「类型 / BPM / 调性 / 乐器编配 / 音色质感 / 混音取向」撰写。
+          支持中文、英文及中英混写。输入框按 <b>1000 字</b>计（平台侧：百炼纯伴奏 2000 字、
+          Mureka 与腾讯云 1024 字），超出部分将被截断。可使用「组合模板库」快速填写。</p>
+      </section>
+      <section>
+        <h3>歌曲结构</h3>
+        <p>段落标签是模型可识别的指令，例如 <code>[Intro]</code> <code>[Verse 1]</code> <code>[Chorus]</code>
+          <code>[Bridge]</code> <code>[Solo]</code> <code>[Outro]</code>，写在歌词中。
+          选择模板后点击「套用到歌词」将骨架写入歌词，再在各段下填写内容。
+          「自定义」可按前奏秒数 / 主歌段数 / 副歌遍数 / 间奏 / 尾奏组合，也可在文本框直接写
+          <code>Verse 1 8, Chorus 16</code> 指定小节数。
+          ★标签计入字数：百炼带人声仅 350 字，结构需与歌词一并计算。</p>
+      </section>
+      <section>
+        <h3>组合模板 / 试听</h3>
+        <p>模板库中每条均为完整的制作简报（流派 + 情绪 + 乐器 + 人声处理 + 节奏）。
+          「用这个」直接填入风格框；「试听」仅播放 <b>前 30 秒</b> ——
+          平台不支持指定时长，只能整首生成，因此按整首计费；同一条模板试听一次后会缓存在本机。</p>
+      </section>
+      <section>
+        <h3>会发送什么</h3>
+        <p>仅发送<b>风格说明</b>与<b>填写的歌词</b>。
+          <b>不发送录音、文件名或工程名。</b>
+          参考音频与音色克隆在本项目中<b>不提供开关</b> —— 这两项功能会上传声音。</p>
+      </section>
+      <section>
+        <h3>零费用验证流程</h3>
+        <p>「试跑（免费）」使用本机鼓组与系统语音朗读歌词，合成一首带人声的歌曲；
+          「人声/伴奏」可正常执行，拆分结果为真实分离。完整流程零费用，确认效果后再使用付费生成。
+          （在 CPU 上拆分一首十几秒的歌曲需要两三分钟，请勿关闭面板。）</p>
+      </section>
+      <section class="helpfoot">
+        <button id="genGuide2" class="mini">再看一遍新手引导</button>
+      </section>
+    </div>
+  </div>
+</div>
+
+<!-- 组合模板库：左边分类、右边条目，每条能试听 30 秒 / 直接填进风格框 -->
+<div id="genLib" class="libpanel" hidden>
+  <div class="libhead">
+    <b>组合模板库</b>
+    <span class="libsub">流派 + 情绪 + 乐器 + 人声处理 + 节奏，每条即一段完整风格说明</span>
+    <span class="grow"></span>
+    <input id="libSearch" class="libin" type="text" spellcheck="false"
+      placeholder="搜：古风 / 140 bpm / trap / 气声…">
+    <span id="libCount" class="libcount"></span>
+    <button id="libClose" class="mini" title="关掉">×</button>
+  </div>
+  <div class="libmain">
+    <div id="libCats" class="libcats"></div>
+    <div id="libList" class="liblist"></div>
+  </div>
+  <div class="libfoot">
+    <span id="libHint" class="genhint">试听将由平台按该模板实际生成一次，仅播放前 30 秒；
+      同一模板试听一次后缓存在本机，再次播放不产生费用。</span>
+    <span class="grow"></span>
+    <button id="libTest" class="mini" title="免费：使用本地鼓组试跑一段节奏">试跑（免费）</button>
+  </div>
+</div>
+
+<div id="drumPanel" class="autopanel" hidden>
+  <div class="autohead">
+    <b>🥁 鼓机</b>
+    <span class="inote">选一套鼓加一条轨，在下面卷帘里一格一格点</span>
+    <span class="grow"></span>
+    <button id="drumClose" class="mini" title="关掉">×</button>
+  </div>
+
+  <div id="drumList" class="autobody"></div>
+
+  <div class="refrow">
+    <input id="drumDir" type="text" spellcheck="false" style="flex:1;min-width:300px"
+      placeholder="下载好的鼓组文件夹路径，比如 D:\鼓包\TR-909">
+    <input id="drumName" type="text" spellcheck="false" style="width:110px" placeholder="起个名（可选）">
+    <button id="drumImport" class="mini">导入</button>
+  </div>
+  <div id="drumState" class="automeas"></div>
+
+  <div class="autonotes">
+    导入 = 把这个文件夹里的 wav 拷进 <code>kits/</code>，按文件名认鼓件（kick / snare / hat / clap / crash / cowbell）。
+    原文件夹不改不删。<br>
+    <b>版权：</b>只有 <b>CC0</b> 的鼓包能跟着开源仓库一起发；99Sounds / Splice / MusicRadar 那种免费包
+    只许自己用，放在本地，别往仓库里推。
+  </div>
+</div>
+
+<div id="expPanel" class="autopanel" hidden>
+  <div class="autohead">
+    <b>📤 导出发行版</b>
+    <span class="inote">真峰卡 −1.0 dBTP · 响度落靶 · 标签写进文件</span>
+    <span class="grow"></span>
+    <button id="expClose" class="mini" title="关掉">×</button>
+  </div>
+
+  <div class="refrow">
+    <label>交付给
+      <select id="expTarget">
+        <option value="self" selected>自己发行（流媒体）</option>
+        <option value="label">交给唱片公司 / 母带师</option>
+      </select>
+    </label>
+    <label class="chk" title="mp3 写入 ID3；wav 插入 `id3 ` 块"><input type="checkbox" id="expEmbed" checked> 把标签和封面写进文件</label>
+    <label class="chk" title="自己发行时常常还要一份小文件试听/发微信"><input type="checkbox" id="expAlsoMp3"> 顺带导一版 mp3</label>
+    <span id="expTargetNote" class="inote"></span>
+  </div>
+
+  <div class="refrow">
+    <label>格式
+      <select id="expFmt">
+        <option value="wav" selected>WAV（发行母带）</option>
+        <option value="mp3">MP3 320k（发微信/试听）</option>
+      </select>
+    </label>
+    <label>采样率
+      <select id="expSr">
+        <option value="48000" selected>48 kHz</option>
+        <option value="44100">44.1 kHz</option>
+      </select>
+    </label>
+    <label>位深
+      <select id="expBits">
+        <option value="24" selected>24 bit</option>
+        <option value="16">16 bit（带抖动）</option>
+      </select>
+    </label>
+    <label>响度
+      <select id="expLoud">
+        <option value="-14" selected>-14 LUFS（流媒体）</option>
+        <option value="-9">-9 LUFS（音量更高）</option>
+        <option value="off">不归一</option>
+      </select>
+    </label>
+  </div>
+
+  <div class="refrow">
+    <label>歌名 <input id="expTitle" type="text" spellcheck="false" style="width:150px"></label>
+    <label>歌手 <input id="expArtist" type="text" spellcheck="false" style="width:130px"></label>
+    <label>专辑 <input id="expAlbum" type="text" spellcheck="false" style="width:130px"></label>
+    <label>年份 <input id="expYear" type="text" spellcheck="false" style="width:66px" placeholder="2026"></label>
+  </div>
+  <div class="refrow">
+    <label>流派 <input id="expGenre" type="text" spellcheck="false" style="width:110px" placeholder="R&B"></label>
+    <label>ISRC <input id="expIsrc" type="text" spellcheck="false" style="width:140px" placeholder="留空也行"></label>
+    <button id="expCoverBtn" class="mini" title="jpg / png，上限 8 MB；将随 mp3 一并写入">封面…</button>
+    <span id="expCoverState" class="inote">没选封面</span>
+    <input id="expCoverFile" type="file" accept=".jpg,.jpeg,.png" hidden>
+  </div>
+
+  <div id="expState" class="automeas"></div>
+  <div id="expBody" class="autobody"></div>
+
+  <div class="autonotes">
+    <b>真峰限制说明：</b>采样峰值为 −0.3 dBFS 的母带经 AAC/Opus 编码后即会出现削顶 ——
+    采样点之间的真峰可高出零点几 dB，在本机无法测得。
+    这里按 4× 过采样的真峰限到 <b>−1.0 dBTP</b>，是流媒体普遍的那条线。
+    <b>mp3</b> 额外预留 0.6 dB（实测编码后真峰会升高 0.2–0.3 dB），避免「wav 达标、mp3 超限」的情况。<br>
+    <b>16 bit</b> 会自动加 TPDF 抖动（固定种子，同样工程导出两次逐字节一样）;
+    24 bit 不抖。<b>标签</b>写进 mp3 的 ID3v2.3（中文用 UTF-16）,wav 不写标签（母带交给发行方）。
+  </div>
+
+  <div class="autofoot">
+    <span class="grow"></span>
+    <button id="expCheck" class="mini" title="走导出那条路渲染一遍再量，不写文件">检查</button>
+    <button id="expCancel" class="mini">取消</button>
+    <button id="expGo" class="btn">导出</button>
   </div>
 </div>
 
@@ -363,28 +825,28 @@
     <b>块编辑</b>
     <select id="bigTrack" title="要编哪一条轨"></select>
     <span class="seg" id="bigViewSeg">
-      <button id="bigViewBlocks" class="mini on" title="按块摆位置(拖 = 移动,两边 = 改长度)">块</button>
-      <button id="bigViewPitch" class="mini" title="上下拖音高(半音吸附;按住 Alt 按音分)">音高</button>
+      <button id="bigViewBlocks" class="mini on" title="按块摆位置（拖 = 移动，两边 = 改长度）">块</button>
+      <button id="bigViewPitch" class="mini" title="上下拖音高（半音吸附；按住 Alt 按音分）">音高</button>
     </span>
-    <button id="bigPen" class="mini" hidden title="在选中的音里画修正曲线(20ms 一点,最多 ±200 音分)">改曲线</button>
-    <button id="bigFlat" class="mini" hidden title="把选中的音的曲线拉平到 0(就唱在这个音上)">拉平</button>
-    <button id="bigClrCurve" class="mini" hidden title="删掉曲线,回到原始音高">清曲线</button>
-    <button id="bigRefBtn" class="mini" hidden title="拿原唱当参照:只画目标线,只修你选中的音">原唱</button>
-    <button id="bigExtend" class="mini" title="把选中的音延长/缩短(生成一段新音频,可听可撤)">补音…</button>
-    <button id="bigPlay" class="mini" title="播放 / 暂停 (空格)">▶ 播放</button>
-    <button id="bigFit" class="mini" title="缩放到能看见这一轨的全部块">全览</button>
+    <button id="bigPen" class="mini" hidden title="在选中的音上绘制修正曲线（20 ms 一点，最多 ±200 音分）">改曲线</button>
+    <button id="bigFlat" class="mini" hidden title="把选中的音的曲线拉平到 0（就唱在这个音上）">拉平</button>
+    <button id="bigClrCurve" class="mini" hidden title="删掉曲线，回到原始音高">清曲线</button>
+    <button id="bigRefBtn" class="mini" hidden title="以原唱为参照：仅绘制目标线，仅修正选中的音">原唱</button>
+    <button id="bigExtend" class="mini" title="把选中的音延长/缩短（生成一段新音频，可听可撤）">补音…</button>
+    <button id="bigPlay" class="mini" title="播放 / 暂停 （空格）">▶ 播放</button>
+    <button id="bigFit" class="mini" title="缩放至可显示当前轨道的全部块">全览</button>
     <button id="bigZoomOut" class="mini">–</button>
     <button id="bigZoomIn" class="mini">+</button>
     <span id="bigInfo" class="inote"></span>
     <span class="grow"></span>
-    <span class="inote" id="bigHint">拖 = 移动 · 拖两边 = 改长度 · 双击 = 切开 · Delete = 删(原地留空) · Ctrl+Z 撤销</span>
-    <button id="bigClose" class="mini danger" title="关掉(改动已经在这个工程里)">×</button>
+    <span class="inote" id="bigHint">拖 = 移动 · 拖两边 = 改长度 · 双击 = 切开 · Delete = 删（原地留空） · Ctrl+Z 撤销</span>
+    <button id="bigClose" class="mini danger" title="关闭（改动已保存至本工程）">×</button>
   </header>
   <div id="bigRefBar" hidden>
     <label>原唱轨 <select id="bigRefTrack"></select></label>
     <label>模式
       <select id="bigRefMode">
-        <option value="intonation" selected>只修音准(保持我的调)</option>
+        <option value="intonation" selected>只修音准（保持我的调）</option>
         <option value="match">完全跟原唱</option>
       </select>
     </label>
@@ -393,7 +855,7 @@
       <span id="bigRefStrengthV">90%</span>
     </label>
     <button id="bigRefGo" class="mini">分析</button>
-    <button id="bigRefImport" class="mini" title="直接选原唱文件:导入成一条轨并选成原唱轨">导入原唱…</button>
+    <button id="bigRefImport" class="mini" title="直接选择原唱文件：导入为一条轨并设为原唱轨">导入原唱…</button>
     <label class="chk"><input type="checkbox" id="bigRefShow" checked> 显示原唱目标线</label>
     <button id="bigRefApply" class="mini">按原唱修选中的音</button>
     <span id="bigRefState" class="inote"></span>
@@ -401,6 +863,77 @@
   <canvas id="bigCanvas"></canvas>
 </div>
 
+<!-- 设置：右上角齿轮。帮助与反馈（手册 / FAQ / 快捷键 / 联系 / 日志）+ 关于 -->
+<div id="settings" class="setpanel" hidden>
+  <div class="sethead">
+    <b>设置</b>
+    <span class="libsub">帮助与反馈 · 关于声麦 Studio Pro</span>
+    <span class="grow"></span>
+    <button id="setClose" class="mini" title="关掉">×</button>
+  </div>
+  <div class="setmain">
+    <nav id="setNav" class="setnav">
+      <div class="setgrp">设置</div>
+      <button class="setitem on" data-sec="prefs">偏好设置</button>
+      <button class="setitem" data-sec="data">数据与缓存</button>
+      <div class="setgrp">帮助与反馈</div>
+      <button class="setitem" data-sec="manual">使用手册</button>
+      <button class="setitem" data-sec="faq">常见问题</button>
+      <button class="setitem" data-sec="keys">快捷键速查</button>
+      <button class="setitem" data-sec="contact">联系邮箱</button>
+      <button class="setitem" data-sec="log">更新日志</button>
+      <div class="setgrp">关于</div>
+      <button class="setitem" data-sec="about">关于声麦 Studio Pro</button>
+    </nav>
+    <div id="setBody" class="setbody"></div>
+  </div>
+</div>
+
+<!-- 首次引导：第一次打开自动出现，之后从设置里随时再看 -->
+<div id="onboard" class="obwrap" hidden>
+  <div class="obcard" role="dialog" aria-modal="true" aria-labelledby="obTitle">
+    <div class="obart">
+      <span id="obKicker" class="obkicker">开始</span>
+      <b id="obNum" class="obnum">01</b>
+      <span id="obTotal" class="obtotal">共 4 步</span>
+    </div>
+    <div class="obmain">
+      <div class="obtop">
+        <span id="obStep">第 1 步 / 共 4 步</span>
+        <span class="grow"></span>
+        <button id="obSkip" class="oblite">跳过引导</button>
+      </div>
+      <div class="obbody">
+        <h2 id="obTitle"></h2>
+        <p id="obLead" class="oblead"></p>
+        <ul id="obPoints" class="obpoints"></ul>
+        <div id="obActs" class="obacts"></div>
+      </div>
+    </div>
+    <div class="obfoot">
+      <label class="obchk" title="勾选后下次启动不再自动显示；仍可通过右上角「?」调出">
+        <input id="obAgain" type="checkbox" checked> 下次不再自动显示
+      </label>
+      <span class="grow"></span>
+      <span id="obDots" class="obdots"></span>
+      <button id="obBack" class="mini">上一步</button>
+      <button id="obNext" class="btn">下一步</button>
+    </div>
+  </div>
+</div>
+
 <script type="module" src="/static/studio/ui.js"></script>
+<script>
+/* 开机计时：模块脚本跑完后报一声「页面自己用了几毫秒」。
+   桌面壳里会写进 boot.log，用来判断慢在 Python 还是慢在页面；
+   浏览器里没有 pywebview.api，静默跳过。 */
+function __smPing(tag) {
+  try {
+    fetch('/api/studio/ui_ping?tag=' + encodeURIComponent(tag)
+          + '&t=' + Math.round(performance.now())).catch(() => {});
+  } catch (e) {}
+}
+window.addEventListener('load', () => __smPing('load 事件'));
+</script>
 </body>
 </html>

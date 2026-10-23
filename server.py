@@ -1,4 +1,4 @@
-"""SingMic —— 手机当麦克风,电脑当调音台。
+"""SingMic —— 免费的本地多轨音乐工作站。
 
 手机浏览器打开 `/phone`(USB 连着、跑过 adb reverse 就行),电脑浏览器打开 `/`。
 声音链路:
@@ -6,7 +6,7 @@
     手机麦克风 -> USB -> 电脑 -> 混响/伴奏 -> 耳机(耳返) + WAV 录音
 
 跑法:
-    D:\\AI\\python.exe D:\\singmic\\server.py
+    python server.py
 """
 from __future__ import annotations
 
@@ -21,26 +21,32 @@ import tomllib
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-import sounddevice as sd
 import soundfile as sf
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parent        # 程序目录：web/、config.toml、sys.path
 WEB = ROOT / "web"
-MUSIC = ROOT / "music"
-REC = ROOT / "recordings"
 CONFIG = ROOT / "config.toml"
 
+# ★ 程序目录必须先上 sys.path:下面要 import 的 lazy_sd 是本目录的文件,
+#   而 `python -I`(隔离模式)不会自动把脚本目录放进来。
 sys.path.insert(0, str(ROOT))
+import lazy_sd as sd                 # noqa: E402  ★ 不是打字错误:见 lazy_sd.py —— 启动时别开 PortAudio
 from audio_engine import (                             # noqa: E402
     Engine, list_loopback_devices, list_output_devices, refresh_portaudio)
 import tuning                                          # noqa: E402
 import studio_api                                      # noqa: E402
 import studio_asr                                      # noqa: E402
+import studio_mix                                      # noqa: E402
 import studio_syllable                                 # noqa: E402
+
+# ★ 数据目录跟着 SINGMIC_DATA 走（服务端只认 studio_mix 算出来的那一份）
+DATA = studio_mix.DATA
+MUSIC = DATA / "music"
+REC = studio_mix.REC
 
 
 def _reopen_output(name: str | None) -> str:
@@ -165,6 +171,89 @@ app.include_router(studio_api.router)
 
 
 # ---------------------------------------------------------------------------
+# 本机服务护栏:只认「从这台机器的这个端口自己发起的」请求
+# ---------------------------------------------------------------------------
+# 只绑 127.0.0.1 挡得住局域网,挡不住**他自己浏览器里的别的网页**:
+#
+#   ① DNS rebinding —— 攻击者的域名先解析到自己的服务器,拿到响应后把 TTL 压到 0,
+#      再解析到 127.0.0.1。此时浏览器认为还在访问 evil.com,于是**绕过同源策略**,
+#      能读能写。★ 但浏览器发请求时的 Host 头跟着 URL 走,仍然是 evil.com —— 所以
+#      只要 Host 必须是 127.0.0.1:端口,DNS rebinding 就死在这里。
+#   ② 直接 fetch('http://127.0.0.1:8765/api/…') —— 响应读不到(CORS 没开),但
+#      **副作用会发生**:text/plain 的 POST 不触发预检,照样能打进来。所以带 Origin
+#      的请求一律校验它。同源 GET/导航本来就不带 Origin,放行。
+#   ③ WebSocket 完全不受 CORS 约束,任何网页都能连 —— 两个 ws 路由各自校验。
+#
+# 不做 token:本机同用户的进程本来就能直接读文件,token 只防浏览器,而① ② 已经把
+# 浏览器这条路堵死了;加 token 要改几十处 fetch,回归风险大于收益。
+_ALLOWED_HOSTS = {f"127.0.0.1:{PORT}", f"localhost:{PORT}"}
+_ALLOWED_ORIGINS = {f"http://127.0.0.1:{PORT}", f"http://localhost:{PORT}"}
+
+
+def _request_allowed(headers) -> bool:
+    host = (headers.get("host") or "").strip().lower()
+    if host not in _ALLOWED_HOSTS:
+        return False
+    origin = headers.get("origin")
+    # 没有 Origin:同源 GET / 页面导航 / 本机命令行工具 —— 放行。
+    # 有 Origin:必须是本服务自己。`null`(沙箱 iframe / file://)一并拒绝。
+    return not origin or origin.strip().lower() in _ALLOWED_ORIGINS
+
+
+@app.middleware("http")
+async def _guard_host_origin(request: Request, call_next):
+    if not _request_allowed(request.headers):
+        return JSONResponse(
+            {"detail": "本服务只接受来自本机页面(127.0.0.1)的请求"},
+            status_code=403, headers=NC)
+    return await call_next(request)
+
+
+# ★ 启动排查用(SINGMIC_BOOT_TRACE=1):记下页面资源是什么时候真的被要走的。
+#   桌面壳「load_url 之后到界面出来」那一段十几秒,只有知道请求几点到,才能分清
+#   是渲染进程起得慢、还是资源本身慢。平时一行也不写。
+_BT0 = float(os.environ.get("SINGMIC_T0") or time.time())
+
+
+def _btrace(msg: str) -> None:
+    if not os.environ.get("SINGMIC_BOOT_TRACE"):
+        return
+    try:
+        root = os.environ.get("SINGMIC_DATA")
+        p = Path(root) / "boot.log" if root else (
+            Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
+            / "SingMic" / "boot.log")
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with open(p, "a", encoding="utf-8") as f:
+            f.write(f"{time.strftime('%H:%M:%S')} +{int((time.time() - _BT0) * 1000):6d}ms {msg}\n")
+    except Exception:                         # noqa: BLE001
+        pass
+
+
+@app.get("/api/studio/ui_ping")
+async def _ui_ping(tag: str = "", t: int = 0):
+    """页面自己报一声「我走到哪一步了」。
+
+    ★ 只写 boot.log,不改任何状态。桥(pywebview.api)在页面刚起来时可能还没挂上,
+      所以这里走普通 fetch,量到的时刻才准。
+    """
+    _btrace(f"PING {tag} 页面内 {t}ms")
+    return {"ok": True}
+
+
+if os.environ.get("SINGMIC_BOOT_TRACE"):
+    @app.middleware("http")
+    async def _trace_http(request: Request, call_next):
+        path = request.url.path
+        watch = not path.startswith("/api/studio/blocks")   # 其余的全都记，看谁把 load 拖住
+        t0 = time.time()
+        resp = await call_next(request)
+        if watch:
+            _btrace(f"HTTP {path} {int((time.time() - t0) * 1000)}ms {resp.status_code}")
+        return resp
+
+
+# ---------------------------------------------------------------------------
 # 页面
 # ---------------------------------------------------------------------------
 # ★ 本地工具的页面一律不缓存:浏览器每次都回服务器问一句,没改就 304,几乎不花钱。
@@ -190,7 +279,9 @@ async def studio() -> FileResponse:
 
 
 @app.get("/api/devices")
-async def api_devices() -> JSONResponse:
+def api_devices() -> JSONResponse:      # ★ 故意不是 async:里面会首次初始化 PortAudio,
+    #   跑在事件循环上会把所有请求(页面自己的 js/css)一起卡住,最多能卡二十秒。
+    #   写成普通 def,Starlette 就会把它丢进线程池。
     return JSONResponse({
         "outputs": [{"id": i, "name": n, "rate": r} for i, n, r in list_output_devices()],
         "default": sd.default.device[1],
@@ -320,9 +411,9 @@ def _safe_src(name: str = "", path: str = "") -> Path:
       永远切不出音块,整页音高视图里只能看到一条灰带。其余路径一律当没这回事。
     """
     rec = REC.resolve()
-    med = (ROOT / "projects" / "media").resolve()
+    med = (DATA / "projects" / "media").resolve()
     if path:
-        p = (ROOT / Path(path)).resolve()
+        p = (DATA / Path(path)).resolve()
         if not (p.is_relative_to(rec) or p.is_relative_to(med)):
             raise HTTPException(404, "没有这个文件")
     else:
@@ -645,6 +736,11 @@ async def api_preview(name: str) -> FileResponse:
 # ---------------------------------------------------------------------------
 @app.websocket("/ws/mic")
 async def ws_mic(ws: WebSocket) -> None:
+    # ★ WebSocket 不受 CORS 约束:任何网页都能往本机端口开一条,不校验就等于
+    #   把麦克风推流口交给互联网上的任意页面。校验与 HTTP 同一套规则。
+    if not _request_allowed(ws.headers):
+        await ws.close(code=1008)
+        return
     await ws.accept()
     mic_clients.add(ws)
     try:
@@ -686,6 +782,9 @@ async def ws_mic(ws: WebSocket) -> None:
 # ---------------------------------------------------------------------------
 @app.websocket("/ws/ui")
 async def ws_ui(ws: WebSocket) -> None:
+    if not _request_allowed(ws.headers):
+        await ws.close(code=1008)
+        return
     await ws.accept()
     ui_clients.add(ws)
     try:
@@ -833,7 +932,8 @@ async def device_watch() -> None:
             # USB 隧道自检(10 秒一次):拔插手机后 adb reverse 会丢,
             # 表现就是手机页「连不上电脑那头的服务」,电脑这边却一切正常。
             loop_now = asyncio.get_running_loop().time()
-            if loop_now - last_adb >= 10.0:
+            # ★ 桌面壳里没有 adb(也不该逼用户去装),别每 10 秒白起一次进程
+            if loop_now - last_adb >= 10.0 and not os.environ.get("SINGMIC_NO_ADB"):
                 last_adb = loop_now
                 if not await asyncio.get_running_loop().run_in_executor(
                         None, _reverse_ok):
@@ -841,7 +941,10 @@ async def device_watch() -> None:
                         None, _add_reverse)
                     print(f"[USB 隧道] 掉了,已重接:{got}", flush=True)
 
-            names = tuple(n for _, n, _ in list_output_devices())
+            # ★ 丢进线程池:第一次调用会初始化 PortAudio(这台机器上 0.9～20 秒),
+            #   直接写在事件循环里会把「整页的 js/css 请求」一起卡住。
+            names = tuple(n for _, n, _ in await asyncio.get_running_loop().run_in_executor(
+                None, list_output_devices))
             if last_names is not None and names != last_names:
                 await broadcast({"type": "reload"})
                 if engine.loop.device and engine.loop.device not in names:

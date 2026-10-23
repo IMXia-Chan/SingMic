@@ -91,10 +91,23 @@ def _db(x: float) -> float:
     return 20.0 * math.log10(max(float(x), 1e-9))
 
 
+def _mono(y: np.ndarray) -> np.ndarray:
+    """分析用的单声道视图:(n, 2) 先取两声道平均。
+
+    ★ 不能直接 `reshape(-1)`:那会把左右**交错**的采样当成一条时间轴,
+      48k 的素材看起来就成了 24k 的镜像,频段占比全错。
+      (分轨从 2026-10 起是立体声,这里必须跟上。)
+    """
+    x = np.asarray(y, dtype=np.float64)
+    if x.ndim == 2:
+        return x.mean(axis=1) if x.shape[1] else np.zeros(0)
+    return x.reshape(-1)
+
+
 def _bands(y: np.ndarray) -> dict:
     """五段能量占比(不依赖 scipy:直接 rfft 分帧累加功率谱)。"""
     n = 4096
-    x = np.asarray(y, dtype=np.float64).reshape(-1)
+    x = _mono(y)
     if len(x) == 0:
         return {k: 0.0 for k in BAND_NAMES}
     if len(x) < n:
@@ -124,7 +137,7 @@ def _bands(y: np.ndarray) -> dict:
 
 def _centroid(y: np.ndarray) -> float:
     n = 4096
-    x = np.asarray(y, dtype=np.float64).reshape(-1)
+    x = _mono(y)
     if len(x) < n:
         return 0.0
     # 取中段一帧就够(只是一个「亮还是闷」的粗指标)
@@ -138,7 +151,7 @@ def _centroid(y: np.ndarray) -> float:
 def _dyn_db(y: np.ndarray) -> float:
     """400ms 窗 RMS(dB)的标准差:越大越「一跳一跳」。"""
     w = int(round(0.4 * SR))
-    x = np.asarray(y, dtype=np.float64).reshape(-1)
+    x = _mono(y)
     if len(x) < w:
         return 0.0
     n = len(x) // w
@@ -195,10 +208,18 @@ def measure(project: dict) -> tuple[list[dict], dict, list[str]]:
 
 
 def _mix_sum(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """两条音频按样本相加。★ 分轨是 (n, 2),别再按单声道摆一个一维缓冲。"""
+    a = np.asarray(a, dtype=np.float32)
+    b = np.asarray(b, dtype=np.float32)
+    if a.ndim == 1 and b.ndim == 2:
+        a = np.repeat(a[:, None], b.shape[1], axis=1)
+    elif a.ndim == 2 and b.ndim == 1:
+        b = np.repeat(b[:, None], a.shape[1], axis=1)
     n = max(len(a), len(b))
-    out = np.zeros(n, dtype=np.float32)
-    out[:len(a)] += a
-    out[:len(b)] += b
+    ch = max(a.shape[1] if a.ndim == 2 else 1, b.shape[1] if b.ndim == 2 else 1)
+    out = np.zeros((n, ch), dtype=np.float32) if ch > 1 else np.zeros(n, dtype=np.float32)
+    out[:len(a)] += a[:, None] if (a.ndim == 1 and ch > 1) else a
+    out[:len(b)] += b[:, None] if (b.ndim == 1 and ch > 1) else b
     return out
 
 

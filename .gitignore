@@ -3,6 +3,29 @@ recordings/
 projects/
 music/
 
+# 任何音频:即使放在别的目录里,也不许误提交(里面可能是本人的声音)
+*.wav
+*.mp3
+*.flac
+*.m4a
+*.aac
+*.ogg
+*.aiff
+
+# 例外:鼓机默认音色由 tools/make_kit.py 合成,不含任何第三方采样,可以随仓库分发
+!kits/**/*.wav
+
+# 密钥 / 令牌 / 云端配置 —— 一份都不许进仓库
+*.pem
+*.key
+*.pfx
+*.p12
+*.jks
+secrets.json
+cloud.json
+prefs.json
+*.secret
+
 # 用户放进去的 VST3 插件(二进制与许可证都归使用者,不随仓库分发)
 vst/
 
@@ -30,3 +53,13 @@ Thumbs.db
 
 # 训练好的音色模型(重新下载即可,不进仓库)
 voice_model/
+
+# 打包产物(194MB,谁要谁自己 build)
+dist/
+build/
+
+# 打包中间产物与商店包(可重新生成,不进仓库)
+packaging/.sdk/
+packaging/layout/
+packaging/out/
+packaging/identity.json

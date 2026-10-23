@@ -15,7 +15,16 @@
 from __future__ import annotations
 
 import numpy as np
-from scipy.signal import find_peaks
+
+
+def _find_peaks(a, **kw):
+    """scipy 按需导入。
+
+    ★ 冻结成 exe 之后 scipy 是启动最贵的一大块,而切块是用户点了「按字/音节」才走的路,
+      开机不该为它付钱 —— 这里只留一个壳,第一次真要用再导入。
+    """
+    from scipy.signal import find_peaks
+    return find_peaks(a, **kw)
 
 import tuning
 
@@ -159,7 +168,7 @@ def segment_syllables(x, sr: int, hop: int = HOP, win: int = WIN):
             pieces.append([a, b, 1])
             continue
         sub[~ok] = -np.inf
-        peaks, _ = find_peaks(sub, distance=min_dist, prominence=PROMINENCE_DB)
+        peaks, _ = _find_peaks(sub, distance=min_dist, prominence=PROMINENCE_DB)
         peaks = peaks + a
         if not len(peaks):
             # 有声但找不到峰(很短的轻声字):整段当一个音节核

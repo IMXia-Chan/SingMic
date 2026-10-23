@@ -26,7 +26,9 @@ select{cursor:var(--curp)}
 html,body{height:100%;margin:0}
 body{
   background:var(--bg); color:var(--fg);
-  font:12px/1.4 "Segoe UI","Microsoft YaHei",system-ui,sans-serif;
+  /* ★ 日文/韩文各有自己的汉字字形与谚文字体:按 html[lang] 排在前头才不会被
+     YaHei 抢走(中文「直」和日文「直」不是同一个字形,韩文谚文 YaHei 更是没有)。 */
+  font:12px/1.4 "Segoe UI","Microsoft YaHei","Microsoft YaHei UI",system-ui,sans-serif;
   display:flex; flex-direction:column; overflow:hidden;
   user-select:none;
   cursor:var(--cur);
@@ -44,9 +46,12 @@ button:active{transform:translateY(1px)}
 
 /* ---- 运输栏 ---- */
 #top{
-  flex:0 0 auto; display:flex; align-items:center; gap:8px;
-  padding:6px 10px; background:linear-gradient(#171b24,#11141b);
-  border-bottom:1px solid var(--line); height:46px;
+  flex:0 0 auto; display:flex; align-items:center; gap:3px;
+  padding:6px 8px; background:linear-gradient(#171b24,#11141b);
+  border-bottom:1px solid var(--line);
+  /* 日语/韩语的按钮比中文长：按内容撑开、整条放不下就整体换行。
+     以前固定 46px 高 + 允许内部折行，韩语会被挤成「자동 속 / 도 측정」一两个字一行。 */
+  height:auto; min-height:46px; flex-wrap:wrap; row-gap:6px;
 }
 #top .back{
   color:var(--dim); text-decoration:none; font-size:18px; padding:0 4px;
@@ -56,7 +61,15 @@ button:active{transform:translateY(1px)}
   width:38px;height:30px;font-size:13px;background:#1d2430;
 }
 #top .tp.on{background:var(--acc);color:#04121c;border-color:var(--acc)}
-#top .mini{padding:3px 8px;height:26px}
+#top .mini{padding:3px 4px;height:26px;white-space:nowrap;font-size:11px}
+/* 社区版:Pro 功能灰掉,右上角一枚 PRO 角标。点了由 js 弹一句说明。 */
+#top .mini.pro-lock{opacity:.5;position:relative;cursor:pointer}
+#top .mini.pro-lock:hover{opacity:.72;border-color:#3d5773}
+#top .mini.pro-lock::after{
+  content:'PRO';position:absolute;top:-7px;right:-5px;
+  font-size:8px;line-height:1;padding:1px 3px;border-radius:3px;letter-spacing:.4px;
+  background:#3a2c14;color:#e0b66c;border:1px solid #6b5127;
+}
 #top .sep{width:1px;height:24px;background:var(--line);margin:0 2px}
 #top .chk,#top .fld{display:flex;align-items:center;gap:4px;color:var(--dim)}
 #top input[type=number]{
@@ -69,7 +82,7 @@ button:active{transform:translateY(1px)}
   color:#bff0ff; min-width:96px; text-align:center;
   background:#0a0e15;border:1px solid var(--line);border-radius:4px;padding:6px 8px;
 }
-#saveState{color:var(--dim);font-size:11px;min-width:60px}
+#saveState{color:var(--dim);font-size:11px;min-width:48px}
 #saveState.dirty{color:var(--warn)}
 
 /* ---- 主体三栏 ---- */
@@ -78,7 +91,9 @@ main{flex:1 1 auto; display:flex; min-height:0}
   flex:0 0 240px; display:flex; flex-direction:column;
   background:var(--bg2); border-right:1px solid var(--line); min-height:0;
 }
-.bhead{display:flex;gap:4px;padding:6px}
+/* 左栏按钮同理：中文两三个字，日韩更长，放不下就换行，不许按字折断 */
+.bhead{display:flex;gap:4px;padding:6px;flex-wrap:wrap}
+.bhead .mini{white-space:nowrap}
 .bhead input{
   flex:1;min-width:0;background:#0d1017;border:1px solid var(--line);
   border-radius:4px;padding:4px 6px;
@@ -145,8 +160,10 @@ main{flex:1 1 auto; display:flex; min-height:0}
 
 /* ---- 底部面板 ---- */
 #bottom{
-  /* 236 时混音台差 11px,M/S 那行会被面板裁掉;250 刚好放得下整条 strip。 */
-  flex:0 0 250px;display:flex;flex-direction:column;min-height:90px;
+  /* ★ 高度要按「最满的一条 strip」算,不是按轨道数。插入链那几行加上之后,
+     一条带 3 个插件的 strip 实际要 245px,250 的面板只给得出 199px ——
+     最下面的 M/S 和末尾那条插件被裁掉,不报错也没滚动条,只是看不见。 */
+  flex:0 0 300px;display:flex;flex-direction:column;min-height:90px;
   background:var(--bg2);border-top:1px solid var(--line);
 }
 .tabs{display:flex;align-items:center;gap:2px;padding:3px 6px;border-bottom:1px solid var(--line)}
@@ -217,8 +234,19 @@ main{flex:1 1 auto; display:flex; min-height:0}
 }
 .fxshell{display:flex;gap:10px;padding:8px;height:calc(100% - 4px);min-height:0}
 .fxside{flex:0 0 300px;display:flex;flex-direction:column;gap:6px;min-height:0}
-.fxhead{display:flex;align-items:baseline;gap:5px;font-size:11px;color:#7b8598}
-.fxhead b{color:var(--fg);font-size:12px}
+/* ★ .pnote 本来是「空面板居中提示」的绝对定位；放进 .fxside 里时它不以侧栏为参照，
+   而是以整个 #panelFx 为参照，于是那行说明被甩到右边参数区、压在滑块上。
+   这里是侧栏底部的一行注释，按普通流排。 */
+.fxside .pnote{
+  position:static;transform:none;left:auto;top:auto;
+  text-align:left;padding:2px 2px 0;margin-top:auto;font-size:11px;
+}
+/* 英文/日文的「插件链：<轨名>  从上到下 = 处理顺序」比中文长，300px 侧栏放不下：
+   允许整块换行（换行处落在两个短语之间），短语内部不许按词折断，轨名过长用省略号。 */
+.fxhead{display:flex;align-items:baseline;gap:5px;font-size:11px;color:#7b8598;flex-wrap:wrap;row-gap:2px}
+.fxhead span{white-space:nowrap}
+.fxhead b{color:var(--fg);font-size:12px;min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fxhead .inote{padding:0;line-height:1.4}
 .fxslots{flex:1 1 auto;overflow:auto;display:flex;flex-direction:column;gap:3px;min-height:60px}
 .fxslot{
   display:flex;align-items:center;gap:4px;padding:4px 5px;border-radius:4px;
@@ -282,7 +310,7 @@ main{flex:1 1 auto; display:flex; min-height:0}
 /* 导出提示 */
 #toast{
   position:fixed;right:14px;bottom:14px;z-index:120;max-width:420px;
-  padding:10px 14px;border-radius:8px;line-height:1.7;
+  padding:10px 34px 10px 14px;border-radius:8px;line-height:1.7;
   background:#16202c;border:1px solid #2c4058;color:#cfe6ff;
   box-shadow:0 10px 30px #000a;opacity:0;transform:translateY(8px);
   transition:opacity .18s,transform .18s;pointer-events:none;
@@ -290,6 +318,14 @@ main{flex:1 1 auto; display:flex; min-height:0}
 #toast.on{opacity:1;transform:none;pointer-events:auto}
 #toast a{color:#7fe0ff}
 #toast .dim{color:#6b778c;font-size:11px}
+/* 关闭键:提示再长也有一处能点,不用干等它自己消失 */
+#toast .tx-x{
+  position:absolute;top:4px;right:4px;width:22px;height:22px;
+  display:grid;place-items:center;padding:0;border:0;border-radius:5px;
+  background:transparent;color:#7d8ea6;font:15px/1 "Segoe UI",sans-serif;
+  cursor:pointer;
+}
+#toast .tx-x:hover{background:#243347;color:#cfe6ff}
 
 /* 拖拽幽灵 */
 body.dragging-cursor{cursor:copy}
@@ -394,6 +430,171 @@ body.dragging-cursor{cursor:copy}
 .autofoot .btn:hover{filter:brightness(1.08)}
 .autofoot button:disabled{opacity:.45; cursor:var(--cur)}
 
+/* ---------------------------------------------------------------- AI 生成:大号双栏工作窗 */
+/* ★ 它跟「一键调音」共用 .autopanel 的深色外壳,但那个壳是 560px 宽的侧边条:
+   要写 1000 字风格说明 + 一整首歌词,那个宽度根本不够用(他原话「框是真的小」)。
+   这里单独换成居中大窗,宽高都钉住,免得内容一变窗口就跳。 */
+.genpanel{
+  left:50%; right:auto; top:50%; bottom:auto;
+  transform:translate(-50%,-50%);
+  width:min(1180px,calc(100vw - 64px));
+  height:min(88vh,940px);
+  max-height:calc(100vh - 24px);
+}
+.genmain{flex:1 1 auto; min-height:0; display:grid; grid-template-columns:400px 1fr}
+.gencol{
+  display:flex; flex-direction:column; gap:7px;
+  padding:12px 16px; overflow:auto; min-width:0;
+}
+.gencol + .gencol{border-left:1px solid var(--line)}
+.gensec{
+  display:flex; align-items:center; gap:8px; margin-top:4px;
+  font-size:11px; font-weight:600; color:#8fa0b6;
+  border-bottom:1px dashed var(--line); padding-bottom:4px;
+}
+.gensec .grow{flex:1 1 auto}
+.gencount{font-weight:400; color:#5f6b80; font-variant-numeric:tabular-nums}
+.gencount.over{color:#ff8fa3}
+.genfld{display:flex; align-items:center; gap:8px; font-size:11.5px; color:#aab8cc}
+.genfld > span{flex:0 0 62px; color:#7b8598}
+.genfld select,.genfld input{flex:1 1 auto; min-width:0; max-width:none; padding:4px 6px}
+.genin{width:100%; padding:5px 8px; font-size:11.5px}
+.genhint{font-size:10.5px; line-height:1.55; color:#6f7d92}
+.genhint b{color:#9db0c8; font-weight:600}
+.genhint.warn{color:#c7a95e}
+.genhint.over{color:#ff8fa3}
+/* key 那一行:有 key 的平台整块藏起来,不占地方 */
+.genkey{display:flex; flex-direction:column; gap:6px}
+.genkeybar{display:flex; align-items:center; gap:6px; flex-wrap:wrap}
+.genvox{display:flex; align-items:center; gap:6px; font-size:11.5px; color:#d8dee9}
+/* 风格说明 / 歌词:大框。风格框固定高度,歌词框吃掉剩下的高度 */
+.genta{
+  width:100%; flex:0 0 auto; resize:none; padding:7px 9px;
+  font:12px/1.6 inherit; font-family:inherit;
+}
+.genta:disabled{opacity:.5}
+.genta::placeholder{color:#4d586b}
+.genlyr{flex:1 1 auto; min-height:150px; resize:vertical}
+/* 风格框也吃剩下的高度:左栏底下不再留一大片空白 */
+#genPrompt{flex:1 1 auto; min-height:130px; resize:vertical}
+.gchips,.gform{display:flex; flex-wrap:wrap; gap:5px}
+.gchip{
+  font-size:10.5px; padding:2px 8px; border-radius:11px;
+  background:#151b26; border:1px solid #263043; color:#93a6bf;
+}
+.gchip:hover{background:#1d2634; border-color:#36455e; color:#cfe0f5}
+/* 标签行:左边一个小标题,右边一串芯片(流派 / 情绪 / 乐器 / 人声特效 / 节奏) */
+.gtagrow{display:flex; gap:7px; align-items:flex-start}
+.gtagrow .gtaglab{
+  flex:0 0 50px; padding-top:3px; font-size:10px; color:#5f6b80; white-space:nowrap;
+}
+.gtagrow .gchips{flex:1 1 auto; min-width:0}
+/* 单项标签整块默认收起:要精细调的时候再展开,平时面板上只留组合模板 */
+.gtags{margin-top:2px}
+.gtags > summary{
+  cursor:var(--curp); outline:none; list-style:none;
+  font-size:10.5px; color:#6f7d92; padding:3px 0 3px 0;
+}
+.gtags > summary::-webkit-details-marker{display:none}
+.gtags > summary::before{content:'＋ '; color:#4d586b}
+.gtags[open] > summary::before{content:'－ '}
+.gtags > summary:hover{color:#a8c6f0}
+.gtags[open]{padding-bottom:4px}
+.gtags[open] .gtagrow{margin-top:5px}
+/* 组合模板:一条填满整段风格说明,做得比单项标签显眼一点 */
+.gchip.preset{background:#182231; border-color:#2e4159; color:#a8c6f0}
+.gchip.preset:hover{background:#1d2b3d; border-color:#3d5773; color:#d3e4fb}
+.gform .gchip i{color:#5f6b80; font-style:normal; margin-left:5px}
+.gform .gchip:hover i{color:#8fa0b6}
+/* 自定义段落参数(前奏秒数 / 主歌段数 / 副歌遍数 / 间奏 / 尾奏秒数) */
+.gparams{
+  display:flex; flex-wrap:wrap; align-items:center; gap:6px 12px;
+  padding:7px 9px; border:1px solid #263043; border-radius:5px; background:#141a24;
+}
+.gparams .gp{
+  display:flex; align-items:center; gap:4px;
+  font-size:10.5px; color:#8fa0b6; white-space:nowrap;
+}
+.gparams .gp > span{color:#7b8598}
+.gparams .gp input[type=number]{
+  width:44px; padding:2px 4px; font-size:10.5px; text-align:center;
+  font-variant-numeric:tabular-nums;
+}
+.gparams .gp i{font-style:normal; color:#5f6b80}
+.gparams .gp.chk{gap:5px; color:#aab8cc; cursor:var(--curp)}
+.gparams .gp.chk input{width:auto; margin:0}
+/* 歌曲地图:段落按小节数分宽度,颜色区分主歌/副歌/桥段 —— 一眼看出整首长什么样 */
+.gformmap{
+  display:flex; height:26px; gap:2px; margin:2px 0 1px;
+  border-radius:4px; overflow:hidden;
+}
+.gformmap .gseg{
+  display:flex; align-items:center; justify-content:center; min-width:6px;
+  border:1px solid #1a202b; border-radius:2px; overflow:hidden;
+}
+.gformmap .gseg em{
+  font-style:normal; font-size:9.5px; color:#b9c8dc; white-space:nowrap;
+  padding:0 3px; text-shadow:0 1px 2px rgba(0,0,0,.6);
+}
+/* 进度行:一个转圈 + 一句话 + 已用时(没有百分比,平台的进度不可信) */
+.genpanel #genState{
+  flex:0 0 auto; max-height:none; padding:7px 16px;
+  border-top:1px solid var(--line); border-bottom:1px solid var(--line);
+}
+.gstate{display:flex; align-items:center; gap:8px; font-size:11.5px; color:#aab8cc}
+.gstate .gmsg{flex:1 1 auto; min-width:0}
+.gstate.busy .gmsg{color:#dbe6f5}
+.gprog{font:600 11px/1 Consolas,monospace; color:#7fe0ff; font-variant-numeric:tabular-nums}
+.gspin{
+  flex:0 0 auto; width:11px; height:11px; border-radius:50%;
+  border:2px solid #2a3346; border-top-color:var(--acc);
+  animation:gspin .8s linear infinite;
+}
+@keyframes gspin{to{transform:rotate(360deg)}}
+/* 结果区:没结果时整块收起,不白占地方 */
+.genpanel #genBody{flex:0 1 auto; max-height:34%; padding:4px 16px 8px}
+.genpanel #genBody:empty{display:none}
+.genpanel #genBody .mrow{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:4px 0}
+.genpanel #genBody .mname{min-width:120px;font-size:11.5px;color:#d8e2f0}
+.genfoot{display:flex; align-items:center; gap:8px; padding:9px 16px; border-top:1px solid var(--line)}
+.genfoot .grow{flex:1 1 auto}
+.gencost{font-size:11px; color:#8c7a4f}
+.genfoot .mini{padding:5px 10px}
+.genfoot .btn{
+  background:var(--acc2); color:#1a0d04; border-color:var(--acc2);
+  font-weight:700; font-size:13px; padding:7px 26px;
+}
+.genfoot .btn:hover{filter:brightness(1.08)}
+.genfoot .btn:disabled{opacity:.45; cursor:var(--cur)}
+/* 说明页:面板上不放长解释,统一收进这一页 */
+.helpwrap{
+  position:fixed; left:50%; top:50%; transform:translate(-50%,-50%);
+  width:min(760px,calc(100vw - 48px)); height:min(82vh,860px); z-index:75;
+  display:flex; flex-direction:column;
+  background:#0e121a; border:1px solid #2b3549; border-radius:12px;
+  box-shadow:0 30px 90px rgba(0,0,0,.75);
+}
+.helpbody{flex:1 1 auto; overflow:auto; padding:2px 26px 24px; user-select:text}
+.helpbody section{padding:15px 0; border-bottom:1px solid #171d28}
+.helpbody section:last-child{border-bottom:0}
+.helpbody h3{
+  margin:0 0 7px; font-size:12.5px; font-weight:600;
+  color:#dbe6f5; letter-spacing:.02em;
+}
+.helpbody p{margin:0; font-size:12px; line-height:1.78; color:#8fa0b6}
+.helpbody ul{margin:0; padding-left:17px}
+.helpbody li{font-size:12px; line-height:1.78; color:#8fa0b6; margin:3px 0}
+.helpbody b{color:#c8d8ea; font-weight:600}
+.helpbody code{
+  background:#151c27; border:1px solid #232d3d; border-radius:3px;
+  padding:0 4px; font-size:11px; color:#9fc4e8;
+}
+@media (max-width:980px){
+  .genpanel{width:calc(100vw - 24px); height:calc(100vh - 40px)}
+  .genmain{grid-template-columns:1fr}
+  .gencol + .gencol{border-left:0; border-top:1px solid var(--line)}
+}
+
 /* ---- 跟原唱矫正:选轨那一行 + 对照曲线 ---- */
 .refrow{
   display:flex; align-items:center; gap:10px; flex-wrap:wrap;
@@ -451,3 +652,647 @@ body.dragging-cursor{cursor:copy}
 }
 button.danger{color:#ff8fa3}
 button.danger:hover{background:#2a1b22; border-color:#ff8fa3}
+
+/* ---------------------------------------------------------------------------
+   组合模板库(接在 AI 生成面板上):左边分类、右边条目,每条能试听 30 秒
+   --------------------------------------------------------------------------- */
+.libpanel{
+  position:fixed; left:50%; top:50%; transform:translate(-50%,-50%);
+  width:min(1060px,calc(100vw - 48px)); height:min(84vh,840px);
+  max-height:calc(100vh - 24px); z-index:70;
+  display:flex; flex-direction:column;
+  background:#0e121a; border:1px solid #2b3549; border-radius:12px;
+  box-shadow:0 30px 90px rgba(0,0,0,.75);
+}
+.libhead{
+  display:flex; align-items:center; gap:10px; padding:11px 16px;
+  border-bottom:1px solid var(--line); flex:0 0 auto;
+}
+.libhead b{font-size:13px; color:#e6edf7; letter-spacing:.01em}
+.libsub{font-size:10.5px; color:#5f6b80}
+.libin{width:210px; padding:4px 9px; font-size:11.5px; border-radius:5px}
+.libin:focus{outline:none; border-color:#2f6f9f; box-shadow:0 0 0 2px rgba(63,182,255,.12)}
+.libcount{font-size:10.5px; color:#5f6b80; font-variant-numeric:tabular-nums}
+.libmain{flex:1 1 auto; min-height:0; display:grid; grid-template-columns:154px 1fr}
+.libcats{border-right:1px solid var(--line); padding:7px 0; overflow:auto}
+.libcat{
+  display:flex; align-items:center; width:100%; padding:6px 13px;
+  background:none; border:0; border-left:2px solid transparent;
+  color:#8fa0b6; font-size:11.5px; text-align:left; cursor:var(--curp);
+}
+.libcat:hover{background:#141a24; color:#cfe0f5}
+.libcat.on{background:#151d29; color:#e6edf7; border-left-color:var(--acc)}
+.libcat i{flex:1 1 auto; font-style:normal; text-align:right; color:#4d586b; font-size:10px}
+.liblist{overflow:auto; padding:2px 0 8px}
+.librow{
+  display:flex; align-items:flex-start; gap:12px; padding:10px 16px;
+  border-bottom:1px solid #161c26;
+}
+.librow:hover{background:#111823}
+.librow.on{background:#131c28}
+.libmeta{flex:1 1 auto; min-width:0}
+.libname{display:flex; align-items:center; gap:7px; flex-wrap:wrap; font-size:12.5px; color:#e2ebf7}
+.libtag{
+  font-size:9.5px; padding:1px 6px; border-radius:9px; font-style:normal;
+  background:#151f2c; border:1px solid #253449; color:#7fa6cf; letter-spacing:.02em;
+}
+.libtag.bpm{font-family:Consolas,monospace; color:#8fb6e6}
+.libb{font-size:10.5px; line-height:1.6; color:#71809a; margin-top:3px;
+  display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden}
+.librow.on .libb{color:#93a6bf; -webkit-line-clamp:4}
+.libact{flex:0 0 auto; display:flex; gap:6px; padding-top:1px}
+.libbtn{
+  font-size:11px; padding:4px 11px; border-radius:5px; white-space:nowrap;
+  background:#141a24; border:1px solid #2b3549; color:#aab8cc; cursor:var(--curp);
+  transition:background .12s, border-color .12s, color .12s;
+}
+.libbtn:hover{background:#1a2331; border-color:#3d5773; color:#d8e6f7}
+.libbtn:disabled{opacity:.45}
+.libbtn.use{background:#16233a; border-color:#2f4a6b; color:#b6d0ee}
+.libbtn.use:hover{background:#1c2c46; border-color:#3d628f; color:#e0eeff}
+.libbtn.playing{background:#1d2f42; border-color:#3f7ba8; color:#bfe3ff}
+.libbar{height:2px; margin-top:6px; border-radius:2px; background:#182231; overflow:hidden}
+.libbar i{display:block; height:100%; width:0; background:var(--acc)}
+.libfoot{
+  display:flex; align-items:center; gap:10px; flex:0 0 auto;
+  padding:8px 16px; border-top:1px solid var(--line);
+}
+.libempty{padding:26px 16px; color:#5f6b80; font-size:11.5px; text-align:center}
+
+/* ---- 生成面板观感:层次、留白、焦点 ---- */
+.genpanel{border-color:#2b3549; border-radius:12px;
+  box-shadow:0 30px 90px rgba(0,0,0,.72)}
+.genpanel .autohead{
+  padding:11px 16px; gap:10px;
+  background:linear-gradient(180deg,#131924 0%,rgba(15,19,27,0) 100%);
+}
+.genpanel .autohead b{color:#e6edf7; font-size:13px; letter-spacing:.01em}
+.genpanel .autohead .inote{color:#5f6b80; font-size:10.5px}
+.genpanel input:focus,.genpanel select:focus,.genpanel textarea:focus{
+  outline:none; border-color:#2f6f9f; box-shadow:0 0 0 2px rgba(63,182,255,.12);
+}
+.genpanel .mini{border-radius:5px; transition:background .12s,border-color .12s,color .12s}
+.genpanel .mini:hover{border-color:#3d5773; color:#d3e4fb}
+.mini.accent{background:#16233a; border-color:#2f4a6b; color:#a8c6f0}
+.mini.accent:hover{background:#1c2c46; color:#d3e4fb}
+.gensec{font-size:10.5px; font-weight:700; letter-spacing:.06em; color:#7f8da1}
+.genfld > span{font-size:10.5px; letter-spacing:.02em}
+@media (max-width:980px){
+  .libpanel{width:calc(100vw - 20px); height:calc(100vh - 30px)}
+  .libmain{grid-template-columns:1fr}
+  .libcats{display:flex; overflow-x:auto; border-right:0; border-bottom:1px solid var(--line)}
+  .libcat{width:auto; border-left:0; border-bottom:2px solid transparent; white-space:nowrap}
+  .libcat.on{border-left:0; border-bottom-color:var(--acc)}
+  .libcat i{display:none}
+  .libsub{display:none}
+}
+
+/* ---------------------------------------------------------------------------
+   首次引导:第一次打开自动出现,之后右上「?」随时再看
+   ★ 一页只讲一件事。左边那块窄栏只放「第几步」,不放插画 ——
+     这台机器上画出来的图容易变成一团噪点,字反而最干净。
+   --------------------------------------------------------------------------- */
+.obwrap{
+  position:fixed; inset:0; z-index:90;
+  display:flex; align-items:center; justify-content:center; padding:24px;
+  background:radial-gradient(120% 90% at 50% -10%,rgba(24,38,60,.94),rgba(5,7,11,.96));
+}
+.obcard{
+  display:grid; grid-template-columns:186px 1fr; grid-template-rows:1fr auto;
+  width:min(760px,100%); min-height:432px; max-height:calc(100vh - 48px);
+  background:#0e121a; border:1px solid #29354a; border-radius:16px;
+  box-shadow:0 40px 120px rgba(0,0,0,.82), inset 0 0 0 1px rgba(90,160,255,.05);
+  overflow:hidden;
+}
+.obart{
+  position:relative; display:flex; flex-direction:column;
+  padding:24px 20px;
+  background:linear-gradient(160deg,#15263d 0%,#101a28 52%,#0c1119 100%);
+  border-right:1px solid #1c2534;
+}
+/* 一道斜光:只是块面节奏,别让它抢字 */
+.obart::after{
+  content:''; position:absolute; inset:0; pointer-events:none;
+  background:linear-gradient(115deg,transparent 42%,rgba(63,182,255,.09) 49%,transparent 57%);
+}
+.obkicker{
+  position:relative; z-index:1;
+  font-size:10.5px; letter-spacing:.26em; color:#5c8bb0;
+}
+.obnum{
+  position:relative; z-index:1; margin-top:auto;
+  font:700 76px/1 "Segoe UI",system-ui,sans-serif; letter-spacing:-.045em;
+  font-variant-numeric:tabular-nums;
+  background:linear-gradient(180deg,#eaf4ff 20%,#4f9ed0 100%);
+  -webkit-background-clip:text; background-clip:text; color:transparent;
+}
+.obtotal{
+  position:relative; z-index:1; margin-top:4px;
+  font-size:11.5px; color:#4a5b74; font-variant-numeric:tabular-nums;
+}
+.obmain{
+  display:flex; flex-direction:column; padding:20px 26px 8px;
+  min-width:0; overflow:auto; user-select:text;
+}
+/* 正文在「步骤行」和「底栏」之间竖向居中:四步内容长短不一,
+   不居中就会每换一步那块空白忽大忽小 */
+.obbody{margin:auto 0; display:flex; flex-direction:column}
+.obtop{display:flex; align-items:center; gap:8px; font-size:10.5px; color:#5f6b80}
+.obtop .grow{flex:1}
+.oblite{
+  background:none; border:0; padding:0; color:#5f6b80;
+  font-size:10.5px; cursor:var(--curp);
+}
+.oblite:hover{color:#a8c6f0; text-decoration:underline}
+.obmain h2{
+  margin:13px 0 9px; font-size:21px; line-height:1.3;
+  font-weight:600; color:#eaf4ff; letter-spacing:.01em;
+}
+.oblead{margin:0 0 15px; font-size:12.5px; line-height:1.78; color:#93a5bd}
+.obpoints{margin:0; padding:0; list-style:none; display:flex; flex-direction:column; gap:9px}
+.obpoints li{
+  display:flex; gap:9px; align-items:baseline;
+  font-size:12px; line-height:1.72; color:#8799b2;
+}
+.obpoints li::before{
+  content:''; flex:0 0 auto; width:5px; height:5px; border-radius:50%;
+  background:#2f6d96; transform:translateY(-2px);
+}
+.obpoints li b{
+  flex:0 0 52px; font-size:11px; font-weight:600; color:#7fb4dd; white-space:nowrap;
+}
+.obpoints li span{flex:1 1 auto; min-width:0}
+.obacts{display:flex; gap:8px; flex-wrap:wrap; margin-top:18px}
+.obact{
+  padding:6px 14px; border-radius:7px; font-size:11.5px;
+  background:#172433; border:1px solid #2d4762; color:#b8d2ec;
+  cursor:var(--curp); transition:background .12s,border-color .12s,color .12s;
+}
+.obact:hover{background:#1d2f45; border-color:#3d6383; color:#e6f2ff}
+.obfoot{
+  grid-column:1 / -1; display:flex; align-items:center; gap:8px;
+  padding:11px 20px; border-top:1px solid #1a2231; background:#0c1017;
+}
+.obfoot .grow{flex:1}
+.obchk{
+  display:flex; align-items:center; gap:6px;
+  font-size:10.5px; color:#67748a; cursor:var(--curp);
+}
+.obchk input{width:auto; margin:0}
+.obdots{display:flex; gap:5px; margin-right:6px}
+.obdots i{width:6px; height:6px; border-radius:50%; background:#28324a; transition:background .15s}
+.obdots i.on{background:var(--acc); box-shadow:0 0 8px rgba(63,182,255,.55)}
+.obfoot .btn{
+  background:var(--acc2); color:#1a0d04; border-color:var(--acc2);
+  font-weight:700; padding:6px 20px;
+}
+.obfoot .btn:hover{filter:brightness(1.08)}
+.obfoot .mini:disabled{opacity:.35; cursor:var(--cur)}
+/* 顶栏那个小「?」:圆一点,别跟旁边的功能键挤在一起 */
+#btnGuide{
+  width:24px; min-width:24px; padding:0; border-radius:50%;
+  color:#8fa0b6; font-weight:700;
+}
+#btnGuide:hover{color:#d3e4fb; border-color:#3d5773}
+.helpfoot{display:flex; justify-content:center; padding-top:16px !important}
+@media (max-width:720px){
+  .obcard{grid-template-columns:1fr; min-height:0}
+  .obart{
+    flex-direction:row; align-items:baseline; gap:10px;
+    padding:14px 20px; border-right:0; border-bottom:1px solid #1c2534;
+  }
+  .obnum{margin:0; font-size:30px}
+  .obtotal{margin:0}
+  .obmain{padding:16px 20px 6px}
+  .obmain h2{font-size:18px}
+  .obfoot{flex-wrap:wrap}
+  .obchk{order:3; width:100%}
+}
+
+/* ---------------------------------------------------------------------------
+   设置:右上角齿轮打开。左边分「帮助与反馈 / 关于」两组,右边一次只显示一页
+   --------------------------------------------------------------------------- */
+.setpanel{
+  position:fixed; left:50%; top:50%; transform:translate(-50%,-50%);
+  width:min(980px,calc(100vw - 48px)); height:min(84vh,820px);
+  max-height:calc(100vh - 24px); z-index:88;
+  display:flex; flex-direction:column;
+  background:#0e121a; border:1px solid #2b3549; border-radius:12px;
+  box-shadow:0 30px 90px rgba(0,0,0,.78);
+}
+.settop{display:flex; align-items:center}   /* 占位:防止以后加行时样式串 */
+.setmain{flex:1 1 auto; min-height:0; display:grid; grid-template-columns:196px 1fr}
+.setnav{
+  display:flex; flex-direction:column; gap:1px; padding:10px 8px;
+  border-right:1px solid var(--line); background:#0c1017; overflow:auto;
+}
+.setgrp{
+  padding:10px 10px 5px; font-size:10px; letter-spacing:.14em;
+  color:#4f5c70; text-transform:uppercase;
+}
+.setgrp:first-child{padding-top:2px}
+.setitem{
+  text-align:left; padding:7px 10px; border:0; border-radius:6px;
+  background:none; color:#8fa0b6; font-size:12px; cursor:var(--curp);
+  border-left:2px solid transparent; transition:background .12s,color .12s;
+}
+.setitem:hover{background:#141b26; color:#cfdcee}
+.setitem.on{background:#16202e; color:#cfe6ff; border-left-color:var(--acc)}
+.setbody{overflow:auto; padding:18px 26px 26px; user-select:text; min-width:0}
+.setbody h3{
+  margin:0 0 10px; font-size:15px; font-weight:600; color:#eaf4ff; letter-spacing:.01em;
+}
+.setbody h4{
+  margin:18px 0 6px; font-size:12px; font-weight:600; color:#9db0c8;
+  letter-spacing:.04em;
+}
+.setbody p{margin:0 0 10px; font-size:12px; line-height:1.8; color:#8fa0b6}
+.setbody ol,.setbody ul{margin:0 0 10px; padding-left:19px}
+.setbody li{font-size:12px; line-height:1.8; color:#8fa0b6; margin:2px 0}
+.setbody b{color:#c8d8ea; font-weight:600}
+.setbody code{
+  background:#151c27; border:1px solid #232d3d; border-radius:3px;
+  padding:0 4px; font-size:11px; color:#9fc4e8;
+}
+.setbody a{color:#7fc4ef; text-decoration:none}
+.setbody a:hover{text-decoration:underline}
+.setbody .settip{
+  margin:14px 0 0; padding:9px 12px; border-radius:7px;
+  background:#131a24; border:1px solid #23303f;
+  font-size:11.5px; line-height:1.7; color:#8fa0b6;
+}
+/* FAQ:一条一个折叠,先看问题,点开才看答案 */
+.faq{border-bottom:1px solid #171d28}
+.faq:last-of-type{border-bottom:0}
+.faq > summary{
+  cursor:var(--curp); outline:none; list-style:none;
+  padding:11px 0 11px 18px; position:relative;
+  font-size:12.5px; color:#c3d2e4;
+}
+.faq > summary::-webkit-details-marker{display:none}
+.faq > summary::before{
+  content:'+'; position:absolute; left:0; top:10px;
+  color:#4f6b86; font-size:13px; width:12px; text-align:center;
+}
+.faq[open] > summary::before{content:'–'; color:#7fc4ef}
+.faq > summary:hover{color:#eaf4ff}
+.faq > div{padding:0 0 12px 18px; font-size:12px; line-height:1.8; color:#8799b2}
+/* 快捷键:一行一个键帽 + 一句作用,比表格好读 */
+.setkeys{display:flex; flex-direction:column; gap:2px}
+.setkey{display:flex; align-items:baseline; gap:12px; padding:6px 0; border-bottom:1px solid #141a24}
+.setkey:last-child{border-bottom:0}
+.setkey kbd{
+  flex:0 0 190px; font:11.5px/1.5 Consolas,"Cascadia Mono",monospace;
+  color:#bcd6ef;
+}
+.setkey kbd i{
+  display:inline-block; margin-right:5px; padding:1px 6px; font-style:normal;
+  background:#161f2c; border:1px solid #2b3a4e; border-bottom-width:2px;
+  border-radius:4px; color:#d6e6f7;
+}
+.setkey span{flex:1 1 auto; font-size:11.5px; color:#8799b2}
+/* 联系 / 关于:左边一个标签、右边一个值 */
+.setrows{display:flex; flex-direction:column; gap:1px; margin:4px 0 6px}
+.setrow{display:flex; gap:14px; padding:9px 0; border-bottom:1px solid #141a24; font-size:12px}
+.setrow:last-child{border-bottom:0}
+.setrow > b{flex:0 0 96px; color:#708097; font-weight:500}
+.setrow > span{flex:1 1 auto; color:#b7c7da; word-break:break-all}
+.setrow > span.muted{color:#5c6878}
+.setabout-ver{
+  display:flex; align-items:baseline; gap:10px; margin:2px 0 16px;
+}
+.setabout-ver b{font:700 30px/1 "Segoe UI",system-ui,sans-serif; color:#eaf4ff}
+.setabout-ver span{font-size:11px; color:#5c6878}
+.setmini{
+  padding:3px 9px; border-radius:5px; font-size:11px;
+  background:#172433; border:1px solid #2d4762; color:#a8c6f0; cursor:var(--curp);
+}
+.setmini:hover{background:#1d2f45; color:#e6f2ff}
+.gearbtn{
+  display:inline-flex; align-items:center; justify-content:center;
+  width:26px; min-width:26px; padding:0; border-radius:6px; color:#8fa0b6;
+  /* 推到顶栏最右边:他要的是「角落里的齿轮」,不是跟着一排按钮排 */
+  margin-left:auto;
+}
+.gearbtn:hover{color:#d3e4fb; border-color:#3d5773}
+@media (max-height:640px){
+  .setpanel{height:calc(100vh - 20px)}
+}
+/* 偏好设置里那几行控件 */
+.setinp{padding:3px 6px; font-size:11.5px; border-radius:5px; max-width:240px; background:#0d1017}
+.setchk{
+  display:inline-flex; align-items:center; gap:6px;
+  font-size:12px; color:#b7c7da; cursor:var(--curp);
+}
+.setchk input{width:auto; margin:0}
+.setnote{
+  display:block; margin-top:4px; font-style:normal;
+  font-size:10.5px; line-height:1.65; color:#66748a;
+}
+
+/* ============================================================================
+   面板外壳 v2(2026-10-22):点外面就收 + 蓝色磨砂玻璃 + 玻璃后面的粒子流
+
+   ★ 这是**真磨砂**,不是画出来的假玻璃:Edge / WebView2 是 Chromium,
+     `backdrop-filter` 原生支持。DSP 界面在面板后面,会真的被糊开。
+   ★ 粒子画在 scrim 里的 canvas 上 —— canvas 在面板**下面**(z 更小),
+     所以面板的 backdrop-filter 会把粒子糊成散景,这才叫「玻璃后面在流」。
+     反过来把粒子放进面板里就只是「面板上的小圆点」。
+   ★ 面板里层(导航条/顶栏/量条)必须一起改成半透明:它们是不透明的,
+     玻璃就只在四周露一圈,里面还是一条铁板 —— 这是「控板里面不好看」的根。
+   ★ 粒子只在有面板开着时跑(fxSync 控制),关掉就 cancel,不白烧 GPU。
+   ============================================================================ */
+
+#fxScrim{
+  position:fixed; inset:0; z-index:54; overflow:hidden;
+  background:
+    radial-gradient(120% 80% at 50% -10%, rgba(26,78,132,.46), rgba(5,11,20,.58) 55%,
+                    rgba(2,5,10,.74)),
+    linear-gradient(180deg, rgba(5,10,20,.18), rgba(5,10,20,.44));
+  backdrop-filter:blur(3px) saturate(1.15);
+  -webkit-backdrop-filter:blur(3px) saturate(1.15);
+  animation:fxFadeIn .16s ease-out;
+}
+@keyframes fxFadeIn{ from{opacity:0} to{opacity:1} }
+
+/* 粒子层:贴在**面板自己身上**,落在面板底色之上、内容之下(z-index:-1)
+   ★ 面板是 fixed + z-index,自成层叠上下文,负 z 的孩子正好夹在中间。
+   ★ 透明度压得很低 —— 他要求「极其微弱,不然喧宾夺主」。 */
+.fxpanel > .fxflow{
+  position:absolute; inset:0; z-index:-1;
+  pointer-events:none; border-radius:inherit; opacity:.65;
+}
+
+/* ---------------------------------------------------------------- 玻璃本体 */
+.fxpanel{
+  /* 唯一一处 !important:各面板底下自己写了 `background:#0f131b` 这种实色,
+     这一条必须压过它们,否则玻璃立刻变成铁板。 */
+  /* 底色和纹理分开写:只写渐变时 computed backgroundColor 是 rgba(0,0,0,0),
+     量「是不是半透明」就会假通过(踩过一次)。 */
+  background-color:rgba(11,26,46,.42) !important;
+  background-image:
+    radial-gradient(120% 80% at 50% 0%, rgba(34,92,150,.30), rgba(34,92,150,0) 62%),
+    linear-gradient(180deg, rgba(16,40,70,.16), rgba(8,20,38,.22));
+  backdrop-filter:blur(15px) saturate(1.65);
+  -webkit-backdrop-filter:blur(15px) saturate(1.65);
+  border-color:rgba(120,205,255,.17) !important;
+  box-shadow:
+    0 34px 100px rgba(0,0,0,.78),
+    0 0 90px -26px rgba(70,180,255,.55),
+    inset 0 1px 0 rgba(200,244,255,.16),
+    inset 0 0 90px -46px rgba(90,190,255,.55);
+}
+
+/* 玻璃顶上的冷色高光 + 一层极淡的横向丝纹(像真的磨砂面) */
+.fxpanel::before{
+  content:''; position:absolute; inset:0; border-radius:inherit; pointer-events:none;
+  background:
+    radial-gradient(120% 55% at 50% -18%, rgba(140,220,255,.16), rgba(140,220,255,0) 58%),
+    repeating-linear-gradient(0deg,
+      rgba(160,215,255,.020) 0 1px, rgba(0,0,0,0) 1px 3px);
+  opacity:1;
+}
+
+/* 会流动的 1px 边框(mask 挖成环) */
+.fxpanel::after{
+  content:''; position:absolute; inset:0; border-radius:inherit; padding:1px;
+  pointer-events:none;
+  background:linear-gradient(115deg,
+    rgba(140,235,255,.92), rgba(140,235,255,.05) 24%,
+    rgba(255,255,255,0) 48%,
+    rgba(178,140,255,.16) 72%, rgba(178,140,255,.82));
+  background-size:300% 300%;
+  -webkit-mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite:xor;
+  mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite:exclude;
+  animation:fxFlow 9s linear infinite;
+}
+@keyframes fxFlow{ 0%{background-position:0% 50%} 100%{background-position:300% 50%} }
+
+/* 四角 L 形括号:8 条 linear-gradient 拼的,不用图片(缩放不糊) */
+.fxpanel .fxcorner{
+  position:absolute; inset:0; border-radius:inherit; pointer-events:none; opacity:.65;
+  background:
+    linear-gradient(#8fe4ff,#8fe4ff) left  12px top    0    / 18px 1px no-repeat,
+    linear-gradient(#8fe4ff,#8fe4ff) left   0   top   12px  / 1px 18px no-repeat,
+    linear-gradient(#8fe4ff,#8fe4ff) right 12px top    0    / 18px 1px no-repeat,
+    linear-gradient(#8fe4ff,#8fe4ff) right  0   top   12px  / 1px 18px no-repeat,
+    linear-gradient(#8fe4ff,#8fe4ff) left  12px bottom 0    / 18px 1px no-repeat,
+    linear-gradient(#8fe4ff,#8fe4ff) left   0   bottom 12px / 1px 18px no-repeat,
+    linear-gradient(#8fe4ff,#8fe4ff) right 12px bottom 0    / 18px 1px no-repeat,
+    linear-gradient(#8fe4ff,#8fe4ff) right  0   bottom 12px / 1px 18px no-repeat;
+}
+
+/* 扫描带:每 9 秒从上往下扫一次(JS 插的 <i>,绝对定位不占布局) */
+.fxpanel .fxscan{
+  position:absolute; left:0; right:0; top:-140px; height:140px;
+  pointer-events:none; border-radius:inherit; mix-blend-mode:screen;
+  background:linear-gradient(180deg,
+    rgba(120,220,255,0) 0%, rgba(120,220,255,.10) 55%,
+    rgba(160,235,255,.26) 96%, rgba(120,220,255,0) 100%);
+  opacity:0; animation:fxScan 9s ease-in-out infinite;
+}
+@keyframes fxScan{
+  0%, 52%   { top:-140px; opacity:0 }
+  58%       { opacity:.85 }
+  80%       { top:100%; opacity:0 }
+  100%      { top:100%; opacity:0 }
+}
+
+/* ------------------------------------------------------- 里层:别让玻璃只露一圈 */
+/* 这些原来都是实色(#0c1017 / #0e121a),不一起改,面板内部就是一块铁板 */
+.fxpanel .setnav{
+  background:linear-gradient(180deg, rgba(120,200,255,.075), rgba(120,200,255,.02));
+  border-right:1px solid rgba(120,205,255,.14);
+}
+.fxpanel .sethead,
+.fxpanel .autohead{
+  background:linear-gradient(180deg, rgba(130,210,255,.09), rgba(130,210,255,0));
+  border-bottom:1px solid rgba(120,205,255,.16);
+}
+.fxpanel .automeas{ background:rgba(0,0,0,.10); border-bottom-color:rgba(120,205,255,.12); }
+.fxpanel .setbody{ background:transparent; }
+.fxpanel .gencol{ background:transparent; }
+
+/* 顶栏标题:冷白 + 一点光 */
+.fxpanel h3, .fxpanel .autohead b{ text-shadow:0 0 20px rgba(120,215,255,.30); }
+.fxpanel h3, .fxpanel .sethead b{ color:#e6f5ff; letter-spacing:.4px; }
+.fxpanel .autohead b{ color:#9fe6ff; }
+.fxpanel .libsub, .fxpanel .sethead .libsub{ color:#7e93aa; }
+
+/* 小节标题:前面一道发光小竖条 —— 里面终于有「设计」了 */
+.fxpanel .setbody h3{
+  display:flex; align-items:center; gap:9px; font-size:15.5px; color:#e6f5ff;
+}
+.fxpanel .setbody h3::before{
+  content:''; flex:0 0 auto; width:3px; height:15px; border-radius:2px;
+  background:linear-gradient(180deg,#8fe8ff,#4a7dff);
+  box-shadow:0 0 14px rgba(110,220,255,.95);
+}
+.fxpanel .setbody h4{ color:#9fc4dd; }
+
+/* 设置行:细冷线分隔 + 悬停泛光 */
+.fxpanel .setrow{ border-bottom-color:rgba(120,200,255,.10); transition:background .15s; }
+.fxpanel .setrow:hover{ background:rgba(120,205,255,.05); }
+.fxpanel .setrow > b{ color:#7f95ab; }
+.fxpanel .setrow > span{ color:#c3d6e8; }
+.fxpanel .setgrp{ color:#5c7f99; }
+
+/* 左栏导航:磨砂药丸,选中项是一道竖光 */
+.fxpanel .setitem{
+  border-radius:7px; color:#8ea3ba; border-left:2px solid transparent;
+  transition:background .15s, color .15s, box-shadow .15s;
+}
+.fxpanel .setitem:hover{ background:rgba(120,205,255,.08); color:#d3e6f5; }
+.fxpanel .setitem.on{
+  background:linear-gradient(90deg, rgba(88,200,255,.22), rgba(88,200,255,.05));
+  color:#ddf3ff; border-left-color:#58c8ff;
+  box-shadow:inset 2px 0 0 #58c8ff, 0 0 24px -12px rgba(88,200,255,.9);
+}
+
+/* 输入框 / 下拉 / 文本域:内嵌玻璃,聚焦一圈冷光 */
+.fxpanel input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+.fxpanel select, .fxpanel textarea{
+  background:rgba(6,16,30,.60);
+  border:1px solid rgba(110,190,240,.18);
+  color:#dcecf8; border-radius:6px;
+  transition:border-color .15s, box-shadow .15s, background .15s;
+}
+.fxpanel input:hover:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+.fxpanel select:hover, .fxpanel textarea:hover{
+  border-color:rgba(120,205,255,.34);
+}
+.fxpanel input:focus, .fxpanel select:focus, .fxpanel textarea:focus{
+  outline:none;
+  border-color:rgba(110,210,255,.55) !important;
+  background:rgba(8,22,40,.74);
+  box-shadow:0 0 0 1px rgba(110,210,255,.25), 0 0 20px -6px rgba(90,200,255,.8);
+}
+
+/* 小按钮 / 芯片:半透明玻璃药丸 */
+.fxpanel .mini{
+  background:rgba(120,205,255,.07);
+  border:1px solid rgba(120,205,255,.16);
+  border-radius:6px; color:#bcd6e8;
+  transition:background .15s, color .15s, border-color .15s, box-shadow .15s;
+}
+.fxpanel .mini:hover{
+  background:rgba(120,205,255,.17); color:#eafaff;
+  border-color:rgba(120,220,255,.42);
+  box-shadow:0 0 18px -8px rgba(120,215,255,.9);
+}
+.fxpanel .gchip{
+  background:rgba(120,205,255,.07);
+  border:1px solid rgba(120,205,255,.18);
+  border-radius:999px; color:#b9d5e8;
+  transition:background .15s, color .15s, border-color .15s, box-shadow .15s;
+}
+.fxpanel .gchip:hover{
+  background:rgba(120,205,255,.18); color:#f0fbff;
+  border-color:rgba(140,225,255,.5);
+  box-shadow:0 0 20px -8px rgba(120,215,255,.95);
+}
+
+/* 关闭键:一圈细环,悬停泛红 —— 一眼知道「点这里退出」 */
+.fxpanel .mini[title*="关"]{
+  border-radius:6px;
+  box-shadow:inset 0 0 0 1px rgba(140,220,255,.16);
+}
+.fxpanel .mini[title*="关"]:hover{
+  color:#ffd9d9; background:rgba(255,90,90,.16);
+  border-color:rgba(255,130,130,.45);
+  box-shadow:inset 0 0 0 1px rgba(255,130,130,.45), 0 0 18px -6px rgba(255,80,80,.8);
+}
+
+/* 主按钮:一点渐变 + 外发光,别是块死橙色 */
+.fxpanel .btn{
+  background-image:linear-gradient(180deg, rgba(255,255,255,.16), rgba(255,255,255,0) 60%);
+  box-shadow:0 0 30px -8px rgba(255,150,60,.85), inset 0 1px 0 rgba(255,230,190,.4);
+}
+
+/* 面板里的滚动条压成一条冷色细线 */
+.fxpanel ::-webkit-scrollbar{ width:8px; height:8px; }
+.fxpanel ::-webkit-scrollbar-thumb{
+  background:linear-gradient(#3d7fa8,#294b63); border-radius:8px;
+}
+.fxpanel ::-webkit-scrollbar-thumb:hover{ background:linear-gradient(#57a8d6,#33607d); }
+
+/* 选择框里的 checkbox 保持系统样子,别染成一坨 */
+.fxpanel .setchk input{ background:none; border:0; box-shadow:none; }
+
+@media (prefers-reduced-motion: reduce){
+  #fxScrim{ animation:none; }
+  .fxpanel::after{ animation:none; }
+  .fxpanel .fxscan{ animation:none; opacity:0; }
+}
+
+/* ==== 界面语言(2026-10-22) ================================
+   日文/韩文要有自己的字形字体:中文的 YaHei 里有汉字,会把日文的「直/骨/今」
+   按中文字形画出来,看不出错但本地人一眼就能认出不是日文。 */
+html[lang="ja"] body{font-family:"Yu Gothic UI","Meiryo UI","Meiryo","MS PGothic","Segoe UI",system-ui,sans-serif}
+html[lang="ko"] body{font-family:"Malgun Gothic","Segoe UI","Microsoft YaHei UI",system-ui,sans-serif}
+html[lang="zh-Hant"] body{font-family:"Microsoft JhengHei UI","Microsoft JhengHei","Segoe UI","Microsoft YaHei UI",system-ui,sans-serif}
+html[lang="en"] body{font-family:"Segoe UI","Microsoft YaHei UI",system-ui,sans-serif}
+
+/* ==== 左上角的 ESC 键(2026-10-22) ============================
+   ★ 他的要求:左上角要有「esc 键」那种样子,按一下退一级,退到底就退出程序。
+   全屏之后没有标题栏、没有关闭按钮,这颗键就是唯一一条退路,所以它必须一直看得见。 */
+#top .esckey{
+  flex:0 0 auto;
+  height:26px; padding:0 9px; border-radius:6px;
+  font:600 11px/1 "Consolas","Cascadia Mono","Segoe UI",sans-serif; letter-spacing:.08em;
+  color:#a9bdd6; background:linear-gradient(#1e2837,#161e2a);
+  border:1px solid #33445c; box-shadow:0 2px 0 #0b0f16;
+}
+#top .esckey:hover{ color:#d8ecff; border-color:#4a6f9b; background:linear-gradient(#25334a,#1a2434) }
+#top .esckey:active{ transform:translateY(1px); box-shadow:0 1px 0 #0b0f16 }
+
+/* 退出确认:盖住一切(z 比引导的 90 还高) */
+.quitwrap{
+  position:fixed; inset:0; z-index:200;
+  display:flex; align-items:center; justify-content:center;
+  background:rgba(4,8,14,.66);
+}
+.quitcard{
+  width:min(420px,calc(100vw - 40px)); padding:22px 22px 18px;
+  background:#101b28; border:1px solid #26384e; border-radius:14px;
+  box-shadow:0 30px 90px rgba(0,0,0,.72);
+  color:#dbe7f4;
+}
+.quitt{ font-size:16px; font-weight:600; letter-spacing:.02em; }
+.quitp{ margin:9px 0 0; font-size:13px; line-height:1.7; color:#8fa3ba; }
+.quitb{ margin-top:20px; display:flex; justify-content:flex-end; gap:8px }
+
+/* 应用内弹窗（替代原生 alert/confirm/prompt）：正中、无网址。
+   ★ 与退出框同一套卡片，z 比退出框再高一档 —— 删文件之类的确认可能从面板里弹出来。 */
+.uiwrap{
+  position:fixed; inset:0; z-index:320;
+  display:flex; align-items:center; justify-content:center;
+  background:rgba(4,8,14,.58);
+}
+.uicard{
+  width:min(460px,calc(100vw - 48px)); padding:20px 22px 16px;
+  background:#101b28; border:1px solid #26384e; border-radius:14px;
+  box-shadow:0 30px 90px rgba(0,0,0,.72);
+  color:#dbe7f4;
+}
+.uit{ font-size:15px; font-weight:600; letter-spacing:.02em; margin-bottom:6px }
+.uim{ font-size:13px; line-height:1.75; color:#a9bcd1; white-space:pre-wrap; word-break:break-word }
+.uiinput{
+  margin-top:14px; width:100%; box-sizing:border-box; height:32px; padding:0 10px;
+  background:#0a1520; color:#e6f0fb; border:1px solid #33445c; border-radius:8px;
+  font:13px/1 "Microsoft YaHei UI","Segoe UI",sans-serif;
+}
+.uiinput:focus{ outline:none; border-color:#3f7fb8; box-shadow:0 0 0 2px rgba(63,127,184,.22) }
+.uib{ margin-top:18px; display:flex; justify-content:flex-end; gap:8px }
+.uib button{
+  height:30px; padding:0 14px; border-radius:8px; cursor:default;
+  font:13px/1 "Microsoft YaHei UI","Segoe UI",sans-serif;
+  color:#c9d8e8; background:#1a2635; border:1px solid #33445c;
+}
+.uib button:hover{ color:#eaf4ff; border-color:#4a6f9b }
+.uib .uik{ color:#08121c; background:#5fb3e8; border-color:#5fb3e8; font-weight:600 }
+.uib .uik:hover{ background:#77c4f2; border-color:#77c4f2 }
+.uib .uik.danger{ color:#fff; background:#c2493f; border-color:#c2493f }
+.uib .uik.danger:hover{ background:#d4574c; border-color:#d4574c }

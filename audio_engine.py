@@ -25,7 +25,7 @@ from datetime import datetime
 from pathlib import Path
 
 import numpy as np
-import sounddevice as sd
+import lazy_sd as sd                 # ★ 不是打字错误:见 lazy_sd.py —— 启动时别开 PortAudio
 import soundfile as sf
 
 try:                                  # ★ 装不上也不能让整个程序起不来

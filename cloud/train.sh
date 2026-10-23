@@ -34,12 +34,18 @@ if [[ ! -f "$RVC_DIR/train/train.py" ]]; then
   exit 2
 fi
 for f in assets/pretrained_v2/f0G48k.pth assets/pretrained_v2/f0D48k.pth \
-         assets/hubert/hubert_base.pt assets/rmvpe/rmvpe.pt; do
+         assets/rmvpe/rmvpe.pt; do
   if [[ ! -f "$RVC_DIR/$f" ]]; then
     echo "缺预训练权重: $RVC_DIR/$f(把 /data/rvc_assets 挂到 /opt/rvc/assets)" >&2
     exit 2
   fi
 done
+# ★ 2.3.260718 起 HuBERT 换成了 Transformers 目录形式(assets/hubert_base/),
+#   不再是老的 assets/hubert/hubert_base.pt;缺 config.json 会在特征提取阶段才报错。
+if [[ ! -f "$RVC_DIR/assets/hubert_base/config.json" ]]; then
+  echo "缺 HuBERT: $RVC_DIR/assets/hubert_base/config.json(+ pytorch_model.bin)" >&2
+  exit 2
+fi
 
 N=$(find "$DATASET" -maxdepth 1 -name '*.wav' | wc -l | tr -d ' ')
 if [[ "$N" -lt 10 ]]; then

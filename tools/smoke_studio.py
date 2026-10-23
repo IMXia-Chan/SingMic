@@ -11,8 +11,10 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import base64
 import json
 import os
+import socket
 import subprocess
 import sys
 import tempfile
@@ -35,6 +37,10 @@ EDGE = r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
 #   SMOKE_PORT=8766 SMOKE_DBG=9225 python tools/smoke_studio.py
 BASE = "http://127.0.0.1:" + os.environ.get("SMOKE_PORT", "8765")
 DBG = int(os.environ.get("SMOKE_DBG", "9224"))
+# ★ 开跑之前就记下偏好文件在不在 —— 浏览器那一段会自己往盘上写,
+#   等测到那一步再判断就永远是「本来就有」,测完也就删不掉了。
+PREFS_FILE = (Path(os.environ.get("SINGMIC_HOME") or (Path.home() / ".singmic")) / "prefs.json")
+PREFS_HAD = PREFS_FILE.exists()
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))          # 量曲线要借 tuning.yin
 MEDIA = ROOT / "projects" / "media"
@@ -121,6 +127,36 @@ def http(path: str, method: str = "GET", data: bytes | None = None, ctype: str =
             return r.status, r.read()
     except urllib.error.HTTPError as e:         # noqa: F821
         return e.code, e.read()
+
+
+def http_hdr(path: str, hdrs: dict) -> int:
+    """带自定义请求头发一个 GET,只回状态码。用来验 Host / Origin 护栏。"""
+    req = urllib.request.Request(BASE + path, headers=hdrs)
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return r.status
+    except urllib.error.HTTPError as e:         # noqa: F821
+        return e.code
+
+
+def ws_status(origin: str, host: str = "") -> int:
+    """裸 socket 发一次 WebSocket 握手,回 HTTP 状态码(101 = 接了)。
+
+    ★ 不用 websockets 库:它握手失败直接抛异常,拿不到状态码;
+      服务端 `close()` 在 `accept()` 之前发的是 **HTTP 403**,这正是要验的东西。
+    """
+    hostport = (host or BASE.split("//", 1)[1])
+    key = base64.b64encode(b"0123456789abcdef").decode()
+    req = (f"GET /ws/ui HTTP/1.1\r\nHost: {hostport}\r\nUpgrade: websocket\r\n"
+           f"Connection: Upgrade\r\nSec-WebSocket-Key: {key}\r\n"
+           f"Sec-WebSocket-Version: 13\r\nOrigin: {origin}\r\n\r\n")
+    with socket.create_connection(("127.0.0.1", int(hostport.rsplit(":", 1)[1])), timeout=10) as s:
+        s.sendall(req.encode())
+        first = s.recv(64).decode("latin-1")
+    try:
+        return int(first.split(" ")[1])
+    except (IndexError, ValueError):
+        return 0
 
 
 def make_media() -> tuple[Path, Path, Path, Path]:
@@ -242,7 +278,30 @@ async def main() -> int:
     a_path = "projects/media/_smoke_a.wav"
     b_path = "projects/media/_smoke_b.wav"
 
+    # ---- 本机服务护栏:Host / Origin ----
+    # ★ 验的是「他自己浏览器里的别的网页打不进本机端口」,不是局域网 —— 那是绑地址管的。
+    #   ① DNS rebinding 时浏览器发的 Host 还是 evil.com,所以 Host 白名单能挡。
+    #   ② 跨站直接 fetch 本机端口:响应读不到(CORS 没开),但 text/plain 的 POST
+    #      不预检、副作用照样发生,所以带 Origin 的请求必须校验。
+    check("护栏:正常请求(无 Origin)照常 200",
+          http_hdr("/api/studio/ui_ping", {}) == 200)
+    check("护栏:Host 不是本机 → 403(挡 DNS rebinding)",
+          http_hdr("/api/studio/ui_ping", {"Host": "evil.example:8766"}) == 403)
+    check("护栏:外站 Origin → 403(挡跨站简单请求)",
+          http_hdr("/api/studio/ui_ping", {"Origin": "http://evil.example"}) == 403)
+    check("护栏:Origin: null → 403",
+          http_hdr("/api/studio/ui_ping", {"Origin": "null"}) == 403)
+    check("护栏:本机 Origin 放行",
+          http_hdr("/api/studio/ui_ping", {"Origin": BASE}) == 200)
+    check("护栏:WebSocket 外站 Origin → 403",
+          ws_status("http://evil.example") == 403)
+    check("护栏:WebSocket 本机 Origin → 101",
+          ws_status(BASE) == 101)
+
     # ---- 纯 HTTP 的工程 CRUD ----
+    # ★ 上一轮要是被中途打断,`_smoke_proj` 会留在盘上、rev 已经不是 0;
+    #   不先删掉,第一条 PUT 就撞 409,看着像「保存坏了」。
+    http("/api/studio/projects/_smoke_proj", "DELETE")
     body = {
         "version": 1, "rev": 0, "title": "冒烟", "bpm": 128,
         "timeSig": [4, 4], "lengthSec": 30, "sources": {},
@@ -597,6 +656,32 @@ async def main() -> int:
                   and abs(sp.get("sum", 0) - sp.get("L", 1)) < 1e-4
                   and sp.get("r0") == sp.get("r1"), str(sp))
 
+            # ★ 接缝:真接缝处淡变必须清零
+            #   以前整块深拷贝 ⇒ 左半留 20ms 淡出、右半留 8ms 淡入,接缝凭空塌 28ms。
+            #   这一条是「切成一块一块能不能听」的底线,不是修饰。
+            sm = await c.ev(
+                "(()=>{const S=STUDIO.S;"
+                "const cs=S.proj.tracks.flatMap(t=>t.clips)"
+                ".filter(x=>S.sel.has(x.id)).sort((a,b)=>a.start-b.start);"
+                "if(cs.length!==2)return {bad:'选中的不是两块:'+cs.length};"
+                "return {out:+cs[0].fadeOut,inn:+cs[1].fadeIn}})()")
+            check("切分:接缝两边淡变都是 0(不再塌出 28ms 的坑)",
+                  isinstance(sm, dict) and sm.get("out") == 0 and sm.get("inn") == 0,
+                  str(sm))
+
+            # 反过来:拿掉一半,剩下那块失去接缝伙伴 ⇒ 头/尾淡变要长回 2.5ms
+            sd = await c.ev(
+                "(()=>{const S=STUDIO.S;"
+                "const cs=S.proj.tracks.flatMap(t=>t.clips)"
+                ".filter(x=>S.sel.has(x.id)).sort((a,b)=>a.start-b.start);"
+                "S.sel.clear();S.sel.add(cs[0].id);STUDIO.deleteSelected();"
+                "const rest=S.proj.tracks.flatMap(t=>t.clips).find(x=>x.id===cs[1].id);"
+                "const inn=rest?+rest.fadeIn:null;STUDIO.undo();"
+                "return {n:rest?1:0,inn}})()")
+            check("删掉接缝的一半:另一半淡变长回 2.5ms(硬边不留)",
+                  isinstance(sd, dict) and sd.get("n") == 1
+                  and abs((sd.get("inn") or 0) - 0.0025) < 1e-9, str(sd))
+
             # ---- 标记(手动打点):加 / 吸附 / 对齐 / 撤销 / 存盘 ----
             mk = await c.ev(
                 "(()=>{const S=STUDIO.S;"
@@ -685,6 +770,11 @@ async def main() -> int:
             check("右键弹出菜单(含复制/切分/对拍)",
                   isinstance(rcm, dict) and rcm.get("on") and rcm.get("n", 0) >= 8
                   and any("切分" in s for s in rcm.get("labels") or []), str(rcm))
+            check("右键菜单里有「拆成乐器轨」四轨/六轨两个口",
+                  isinstance(rcm, dict)
+                  and any("拆成乐器轨（四轨" in s for s in rcm.get("labels") or [])
+                  and any("拆成乐器轨（六轨" in s for s in rcm.get("labels") or []),
+                  str(rcm.get("labels")) if isinstance(rcm, dict) else "")
 
             # 混音台:每条轨一条推子 + 总推子,电平表在跑
             mix = await c.ev(
@@ -874,6 +964,140 @@ async def main() -> int:
                 fn = str(exp.get("file") or "")
                 if fn:
                     (ROOT / "projects" / "exports" / fn).unlink(missing_ok=True)
+
+            # ---- 阶段 5b:发行版导出(规格 / 检查 / 标签)----
+            await c.ev("STUDIO.openExportPanel()", await_promise=True)
+            dflt = await c.ev(
+                "(()=>({hid:document.getElementById('expPanel').hidden,"
+                "fmt:document.getElementById('expFmt').value,"
+                "sr:document.getElementById('expSr').value,"
+                "bits:document.getElementById('expBits').value,"
+                "loud:document.getElementById('expLoud').value,"
+                "title:document.getElementById('expTitle').value}))()")
+            check("导出面板打得开,默认 wav/48k/24bit/-14",
+                  isinstance(dflt, dict) and dflt.get("hid") is False
+                  and dflt.get("fmt") == "wav" and dflt.get("sr") == "48000"
+                  and dflt.get("bits") == "24" and dflt.get("loud") == "-14",
+                  str(dflt))
+            check("歌名默认带出工程名", bool((dflt or {}).get("title")), str(dflt))
+
+            # 传一张封面(jpg),像发 demo 那样带上
+            cover_bytes = (b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00"
+                           + b"\xff\xdb\x00\x43\x00" + b"\x08" * 64 + b"\xff\xd9")
+            cst, craw = http("/api/studio/cover?name=smoke_cover.jpg", "POST",
+                             cover_bytes, "application/octet-stream")
+            cover_path = ""
+            if cst == 200:
+                try:
+                    cover_path = json.loads(craw.decode("utf-8")).get("path", "")
+                except Exception:              # noqa: BLE001
+                    cover_path = ""
+            check("封面传得上(存进媒体目录)", bool(cover_path), f"HTTP {cst} {cover_path}")
+
+            # ★ 顺序要紧:先把封面写进 meta、把面板打开(打开时会按工程重置一遍控件),
+            #   再改控件 —— 反过来会被 loadExpPanel 盖掉。
+            js_set = ("(async()=>{"
+                      + (f"STUDIO.S.proj.meta=Object.assign({{}},STUDIO.S.proj.meta,"
+                         f"{{cover:{json.dumps(cover_path)}}});" if cover_path else "")
+                      + "await STUDIO.openExportPanel();"
+                      "document.getElementById('expSr').value='44100';"
+                      "document.getElementById('expBits').value='16';"
+                      "document.getElementById('expTitle').value='冒烟测试';"
+                      "document.getElementById('expArtist').value='Selftest';"
+                      "const l=document.getElementById('expLoud');l.value='-14';"
+                      "l.dispatchEvent(new Event('change'));"
+                      "return STUDIO.exportOptions();})()")
+            opts = await c.ev(js_set, await_promise=True)
+            check("面板的值真的变成导出选项(44.1k / 16bit / -14)",
+                  isinstance(opts, dict) and opts.get("sr") == 44100
+                  and opts.get("bits") == 16 and opts.get("loudness") == -14,
+                  str(opts))
+            check("封面进了导出选项", bool((opts or {}).get("cover")),
+                  str((opts or {}).get("cover")))
+
+            chk = await c.ev("STUDIO.exportCheck()", await_promise=True, timeout=240)
+            vmap = {v["key"]: v for v in (chk or {}).get("verdicts", [])}
+            rep = (chk or {}).get("report") or {}
+            check("发行检查量得出来(44.1k 渲染)",
+                  isinstance(chk, dict) and rep.get("sr") == 44100, str(rep)[:160])
+            check("发行检查:真峰 ≤ -1.0 dBTP",
+                  vmap.get("true_peak", {}).get("ok") is True, str(vmap.get("true_peak")))
+            check("发行检查:响度落在 -14 ±1",
+                  vmap.get("lufs", {}).get("ok") is True, str(vmap.get("lufs")))
+
+            # 导一版 44.1k / 16bit wav:规格与字节都要对
+            r16 = await c.ev("STUDIO.exportProject(null,{})", await_promise=True,
+                             timeout=240)
+            if isinstance(r16, dict) and r16.get("url"):
+                st, wav = http(r16["url"])
+                if st == 200:
+                    import io as _io
+                    y16, sr16 = sf.read(_io.BytesIO(wav), always_2d=True)
+                    info16 = sf.info(_io.BytesIO(wav))
+                    check("wav 按 44.1k / PCM_16 写出来",
+                          sr16 == 44100 and info16.subtype == "PCM_16",
+                          f"{sr16}Hz {info16.subtype}")
+                    check("导出回执带发行规格",
+                          r16.get("sr") == 44100 and r16.get("bits") == 16,
+                          str({k: r16.get(k) for k in ("sr", "bits", "tagged")}))
+                    check("导出回执带发行检查(真峰)",
+                          bool((r16.get("check") or {}).get("report")),
+                          str((r16.get("check") or {}).get("report"))[:120])
+                fn = str(r16.get("file") or "")
+                if fn:
+                    (ROOT / "projects" / "exports" / fn).unlink(missing_ok=True)
+
+            # 换 mp3:标签要真写进文件(ID3v2.3 + UTF-16 中文)
+            await c.ev("(()=>{const e=document.getElementById('expFmt');"
+                       "e.value='mp3';e.dispatchEvent(new Event('change'));"
+                       "return e.value})()")
+            check("换 mp3 后位深框灰掉",
+                  await c.ev("document.getElementById('expBits').disabled") is True)
+            rmp3 = await c.ev("STUDIO.exportProject(null,{})", await_promise=True,
+                              timeout=240)
+            if isinstance(rmp3, dict) and rmp3.get("url"):
+                st, blob = http(rmp3["url"])
+                check("mp3 文件头是 ID3v2.3",
+                      st == 200 and blob[:6] == b"ID3\x03\x00\x00",
+                      f"HTTP {st} {blob[:10].hex()}")
+                check("mp3 里读得到中文标题",
+                      b"\xff\xfe" + "冒烟测试".encode("utf-16-le") in blob)
+                check("mp3 里带着封面(APIC)",
+                      b"APIC" in blob and b"image/jpeg" in blob)
+                fn = str(rmp3.get("file") or "")
+                if fn:
+                    (ROOT / "projects" / "exports" / fn).unlink(missing_ok=True)
+            # 交付给唱片公司 = 母带前混音:不压响度、峰留 -6、标签默认不写
+            lab = await c.ev(
+                "(()=>{const s=document.getElementById('expTarget');"
+                "s.value='label';s.dispatchEvent(new Event('change'));"
+                "const o=STUDIO.exportOptions();"
+                "return {o:o,loud:document.getElementById('expLoud').value,"
+                "embed:document.getElementById('expEmbed').checked,"
+                "bits:document.getElementById('expBits').value,"
+                "note:document.getElementById('expTargetNote').textContent};})()")
+            check("选「交给唱片公司」→ 响度关、余量 -6、标签默认不写",
+                  isinstance(lab, dict) and lab.get("loud") == "off"
+                  and (lab.get("o") or {}).get("peak") == -6
+                  and lab.get("embed") is False
+                  and (lab.get("o") or {}).get("loudness") is None,
+                  str(lab))
+            chk2 = await c.ev("STUDIO.exportCheck()", await_promise=True, timeout=240)
+            rep2 = (chk2 or {}).get("report") or {}
+            vk2 = {v["key"] for v in (chk2 or {}).get("verdicts", [])}
+            # ★ 量真峰:余量是给后级的,采样峰比它低零点几 dB 是正常的
+            check("母带前混音:真峰落在 -6 ±0.2 dBTP",
+                  abs(float(rep2.get("true_peak_db", 99)) + 6.0) <= 0.2,
+                  str(rep2.get("true_peak_db")))
+            check("母带前混音不判响度(没有 lufs 这一项)", "lufs" not in vk2,
+                  str(sorted(vk2)))
+            await c.ev("(()=>{const s=document.getElementById('expTarget');"
+                       "s.value='self';s.dispatchEvent(new Event('change'));"
+                       "return 1})()")
+            check("选回「自己发行」→ 响度回到 -14、标签重新勾上",
+                  (await c.ev("STUDIO.exportOptions()")).get("loudness") == -14
+                  and await c.ev("document.getElementById('expEmbed').checked") is True)
+            await c.ev("document.getElementById('expPanel').hidden=true")
 
             # ---- 阶段 8:每轨混响/延迟 + 母带 ----
             fxr = await c.ev(
@@ -1174,6 +1398,20 @@ async def main() -> int:
             check("刷新后工程逐字段还原", before == after, f"{before} vs {after}")
 
             # ---- 歌库 + 跟原唱(本机知识库:认歌 / 第二次秒开 / 应用可撤销) ----
+            # ★ 歌库按内容指纹存,同一段音频跑第二遍就会命中上一遍的记录,
+            #   「第一次听就存下」必然失败。跑之前先清掉本次测试用的几条(只删 _rs_ 开头的)。
+            try:
+                _lib = json.loads(urllib.request.urlopen(
+                    BASE + "/api/studio/reference/library", timeout=10).read())
+                for _e in (_lib.get("entries") or []):
+                    if str(_e.get("name") or "").startswith("_rs_"):
+                        _rq = urllib.request.Request(
+                            BASE + "/api/studio/reference/library/" + _e["id"],
+                            method="DELETE")
+                        urllib.request.urlopen(_rq, timeout=10).read()
+            except Exception:      # noqa: BLE001  清不掉就让断言如实失败,不掩盖
+                pass
+
             rs = await c.ev(
                 "(()=>{const A=(n,d)=>STUDIO.addClip({kind:'media',name:n,"
                 "path:'projects/media/'+n,dur:d},0,null);"
@@ -2406,12 +2644,15 @@ async def main() -> int:
                     http("/api/studio/media/" + nm, "DELETE")
 
             # 删录音(界面路径):确认后真删、左栏跟着少一条
+            # ★ 2026-10-22 起确认框是页面内的 .uiwrap（不再走原生 confirm）：
+            #   这里用一个 25ms 的「自动按确定」小泵，弹出来就点。
             del_rec = await c.ev(
-                "(()=>{const old=window.confirm;window.confirm=()=>true;"
+                "(()=>{const t=setInterval(()=>{const b=document.querySelector('.uiwrap .uik');"
+                "if(b){clearInterval(t);b.click();}},25);"
                 "return STUDIO.deleteRecording('smoke_blocks_voice.wav')"
-                ".then(ok=>{window.confirm=old;"
+                ".then(ok=>{clearInterval(t);"
                 "return {ok:ok,still:STUDIO.S.recs.some(f=>f.name==='smoke_blocks_voice.wav')};})"
-                ".catch(e=>{window.confirm=old;return {err:String(e)};});})()",
+                ".catch(e=>{clearInterval(t);return {err:String(e)};});})()",
                 await_promise=True, timeout=60)
             check("删录音(界面):确认后从盘上删掉、左栏也没了",
                   (del_rec or {}).get("ok") is True
@@ -2421,12 +2662,13 @@ async def main() -> int:
             ui_media = MEDIA / "_del_ui.wav"
             sf.write(str(ui_media), np.zeros(4800, dtype=np.float32), 48000)
             del_med = await c.ev(
-                "(()=>{const old=window.confirm;window.confirm=()=>true;"
+                "(()=>{const t=setInterval(()=>{const b=document.querySelector('.uiwrap .uik');"
+                "if(b){clearInterval(t);b.click();}},25);"
                 "return STUDIO.deleteMedia({name:'_del_ui.wav',"
                 "path:'projects/media/_del_ui.wav',dur:0.1})"
-                ".then(ok=>{window.confirm=old;"
+                ".then(ok=>{clearInterval(t);"
                 "return {ok:ok,still:(STUDIO.S.media||[]).some(f=>f.name==='_del_ui.wav')};})"
-                ".catch(e=>{window.confirm=old;return {err:String(e)};});})()",
+                ".catch(e=>{clearInterval(t);return {err:String(e)};});})()",
                 await_promise=True, timeout=60)
             check("删媒体(界面):确认后从盘上删掉、列表也没了",
                   (del_med or {}).get("ok") is True
@@ -2492,6 +2734,555 @@ async def main() -> int:
             else:
                 check("最长录音解码 <3 秒", False, "拿不到录音列表")
 
+            # ---- 拆轨按钮:四轨 / 六轨各带各的档位(不真跑 demucs,只拦请求) ----
+            gch = await c.ev(
+                "(async()=>{const orig=window.fetch;const seen=[];"
+                "window.fetch=async(url,opts)=>{const u=String(url);let body=null;"
+                "try{body=opts&&opts.body?JSON.parse(opts.body):null;}catch(e){}"
+                "seen.push({u,body});"
+                "const data=u.includes('/gen/fetch')"
+                "?{source:{path:'projects/media/x.wav',name:'x.wav',sec:3}}"
+                ":(u.includes('/reference/stems')?{ok:true,sources:[]}:{});"
+                "return {ok:true,headers:{get:()=>'application/json'},"
+                "json:async()=>data,text:async()=>''};};"
+                "try{document.getElementById('genPanel').hidden=false;"
+                "STUDIO.genChoices('t_probe',[{path:'projects/media/x.wav',sec:3}]);"
+                "const b4=document.querySelector('#genBody [data-split]');"
+                "const b6=document.querySelector('#genBody [data-split6]');"
+                "b6.click();await new Promise(r=>setTimeout(r,80));"
+                "const s6=(seen.find(x=>x.u.includes('/reference/stems'))||{}).body||{};"
+                "seen.length=0;b4.click();await new Promise(r=>setTimeout(r,80));"
+                "const s4=(seen.find(x=>x.u.includes('/reference/stems'))||{}).body||{};"
+                "return {has4:!!b4,has6:!!b6,m6:s6.model,m4:s4.model,"
+                "src:s6.source};}finally{window.fetch=orig;"
+                "document.getElementById('genPanel').hidden=true;}})()",
+                await_promise=True, timeout=60)
+            check("拆轨:四轨/六轨两个按钮都在,各自把档位发给后端",
+                  isinstance(gch, dict) and gch.get("has4") and gch.get("has6")
+                  and gch.get("m6") == "6" and gch.get("m4") == "4"
+                  and gch.get("src") == "projects/media/x.wav", str(gch))
+
+            # ---- 生成面板:大窗 + 双栏 + 字数 + 歌曲结构 ----
+            # 他原话「那个框是真的小」⇒ 这里真量窗口尺寸和居中,不看样式表写没写
+            gnew = await c.ev(
+                "(async()=>{"
+                "const p=document.getElementById('genPanel');p.hidden=false;"
+                "await new Promise(r=>setTimeout(r,60));"
+                "const r=p.getBoundingClientRect();"
+                "const prov=document.getElementById('genProvider');"
+                "prov.value='bailian';prov.dispatchEvent(new Event('change'));"
+                "await new Promise(r=>setTimeout(r,30));"
+                "const models=[...document.getElementById('genModel').options].map(o=>o.value);"
+                "const vocal=document.getElementById('genVocal');vocal.checked=true;"
+                "vocal.dispatchEvent(new Event('change'));"
+                "const pr=document.getElementById('genPrompt');"
+                "const lyr=document.getElementById('genLyrics');"
+                "pr.value='R&B, 82 bpm, Rhodes';pr.dispatchEvent(new Event('input'));"
+                "lyr.value='夜';lyr.dispatchEvent(new Event('input'));"
+                "const pc=document.getElementById('genPromptCount').textContent;"
+                "const lc=document.getElementById('genLyricsCount').textContent;"
+                "const hint1=document.getElementById('genLyricsHint').textContent;"
+                "lyr.value='';lyr.dispatchEvent(new Event('input'));"
+                "const form=document.getElementById('genForm');form.value='pop';"
+                "form.dispatchEvent(new Event('change'));"
+                "const chips=document.querySelectorAll('#genFormChips [data-sec]').length;"
+                "const len=document.getElementById('genFormLen').textContent;"
+                "document.getElementById('genFormApply').click();"
+                "const txt=lyr.value;"
+                "p.hidden=true;"
+                "return {w:Math.round(r.width),h:Math.round(r.height),"
+                "cx:Math.round(r.left+r.width/2),vw:innerWidth,models,pc,lc,hint1,"
+                "chips,len,txt:txt.slice(0,60)};})()",
+                await_promise=True, timeout=40)
+            gn = gnew if isinstance(gnew, dict) else {}
+            check("生成面板够大且居中(≥1000×600,横向居中)",
+                  gn.get("w", 0) >= 1000 and gn.get("h", 0) >= 600
+                  and abs(gn.get("cx", 0) - gn.get("vw", 0) / 2) <= 2,
+                  f"{gn.get('w')}×{gn.get('h')} · 中心 {gn.get('cx')} / 视口 {gn.get('vw')}")
+            check("换平台会重铺模型清单(百炼只给 fun-music)",
+                  gn.get("models") == ["auto", "fun-music-v1"], str(gn.get("models")))
+            check("字数统计按平台给上限(百炼歌词 350 / 风格 1000)",
+                  gn.get("pc") == "19 / 1000" and gn.get("lc") == "1 / 350",
+                  f"风格 {gn.get('pc')} · 歌词 {gn.get('lc')}")
+            check("歌词太短时明确说还差几个字",
+                  "还差" in str(gn.get("hint1")), str(gn.get("hint1"))[:60])
+            check("歌曲结构:模板出段落芯片 + 预计时长,套用后写进歌词",
+                  gn.get("chips") == 9 and "[Intro]" in str(gn.get("txt"))
+                  and "[Chorus]" in str(gn.get("txt")) and "小节" in str(gn.get("len")),
+                  f"{gn.get('chips')} 段 · {gn.get('len')} · {str(gn.get('txt'))[:30]}")
+
+            # ---- 结构模板要够多、要有地图;模型清单按「平台 × 人声/伴奏」筛 ----
+            gext = await c.ev(
+                "(async()=>{"
+                "const p=document.getElementById('genPanel');p.hidden=false;"
+                "const fs=document.getElementById('genForm');"
+                "const nForms=fs.options.length;"
+                "const prov=document.getElementById('genProvider');"
+                "const vocal=document.getElementById('genVocal');"
+                "prov.value='mureka';prov.dispatchEvent(new Event('change'));"
+                "vocal.checked=true;vocal.dispatchEvent(new Event('change'));"
+                "const songM=[...document.getElementById('genModel').options].map(o=>o.value);"
+                "vocal.checked=false;vocal.dispatchEvent(new Event('change'));"
+                "const instM=[...document.getElementById('genModel').options].map(o=>o.value);"
+                "fs.value='edm';fs.dispatchEvent(new Event('change'));"
+                "const drop=[...document.querySelectorAll('#genFormChips [data-sec]')]"
+                ".some(b=>b.dataset.sec==='Drop');"
+                "const maps=document.querySelectorAll('#genFormMap .gseg').length;"
+                "const mapH=document.getElementById('genFormMap').getBoundingClientRect().height;"
+                "fs.value='custom';fs.dispatchEvent(new Event('change'));"
+                "const ci=document.getElementById('genFormCustom');"
+                "ci.value='Intro 4, Verse 1 8, Chorus 16';ci.dispatchEvent(new Event('input'));"
+                "const cchips=document.querySelectorAll('#genFormChips [data-sec]').length;"
+                "const clen=document.getElementById('genFormLen').textContent;"
+                "p.hidden=true;"
+                "return {nForms,songM,instM,drop,maps,mapH,cchips,clen};})()",
+                await_promise=True, timeout=40)
+            ge = gext if isinstance(gext, dict) else {}
+            check("结构模板够多(≥12 个,含电子/摇滚/古风/配乐)",
+                  ge.get("nForms", 0) >= 12, str(ge.get("nForms")))
+            check("EDM 模板带 Drop,歌曲地图按段数出块",
+                  ge.get("drop") is True and ge.get("maps") == 7
+                  and ge.get("mapH", 0) >= 20,
+                  f"Drop={ge.get('drop')} · {ge.get('maps')} 块 · 高 {ge.get('mapH')}")
+            check("自定义结构能写小节数(Intro 4 + Verse 8 + Chorus 16)",
+                  ge.get("cchips") == 3 and "28 小节" in str(ge.get("clen")),
+                  f"{ge.get('cchips')} 段 · {ge.get('clen')}")
+            check("模型清单按平台×人声筛:mureka 带人声有 mureka-9,纯伴奏换成 7.5",
+                  "mureka-9" in (ge.get("songM") or [])
+                  and "mureka-9" not in (ge.get("instM") or [])
+                  and "mureka-7.5" in (ge.get("instM") or []),
+                  f"带人声 {ge.get('songM')} · 纯伴奏 {ge.get('instM')}")
+
+            # ---- 参数化段落(照 MuseAI 大师写歌):前奏秒 / 主歌段 / 副歌遍 / 间奏 / 尾奏 ----
+            gpar = await c.ev(
+                "(async()=>{"
+                "const p=document.getElementById('genPanel');p.hidden=false;"
+                "const pr=document.getElementById('genPrompt');"
+                "pr.value='R&B, 82 bpm, Rhodes';pr.dispatchEvent(new Event('input'));"
+                "const fs=document.getElementById('genForm');"
+                "fs.value='custom';fs.dispatchEvent(new Event('change'));"
+                "const ci=document.getElementById('genFormCustom');ci.value='';"
+                "ci.dispatchEvent(new Event('input'));"
+                "const params=document.getElementById('genFormParams');"
+                "const vis=!params.hidden;"
+                "const setP=(id,v)=>{const el=document.getElementById(id);"
+                "el.value=v;el.dispatchEvent(new Event('input'));};"
+                "setP('gpIntro',10);setP('gpVerse',2);setP('gpChorus',3);setP('gpOutro',6);"
+                "const gi=document.getElementById('gpInter');gi.checked=true;"
+                "gi.dispatchEvent(new Event('change'));"
+                "const secs=[...document.querySelectorAll('#genFormChips [data-sec]')]"
+                ".map(b=>b.dataset.sec);"
+                "const len=document.getElementById('genFormLen').textContent;"
+                "const mapN=document.querySelectorAll('#genFormMap .gseg').length;"
+                "setP('gpVerse',1);"
+                "const secs2=document.querySelectorAll('#genFormChips [data-sec]').length;"
+                "setP('gpIntro',99);"
+                "const lenClamp=document.getElementById('genFormLen').textContent;"
+                "fs.value='pop';fs.dispatchEvent(new Event('change'));"
+                "const hid=params.hidden;"
+                "p.hidden=true;"
+                "return {vis,secs,len,mapN,secs2,lenClamp,hid};})()",
+                await_promise=True, timeout=40)
+            gp = gpar if isinstance(gpar, dict) else {}
+            _secs = [str(x) for x in (gp.get("secs") or [])]
+            check("自定义结构有参数化输入(前奏秒/主歌段/副歌遍/间奏/尾奏)",
+                  gp.get("vis") is True and gp.get("hid") is True,
+                  f"custom 显示={gp.get('vis')} · 切回模板后隐藏={gp.get('hid')}")
+            check("按参数搭段落:2 主歌 3 副歌 + 间奏插在末遍副歌前",
+                  len(_secs) == 8 and _secs[:2] == ["Intro", "Verse 1"]
+                  and _secs[-3:] == ["Interlude", "Chorus", "Outro"]
+                  and _secs.count("Chorus") == 3
+                  and "49 小节" in str(gp.get("len"))
+                  and gp.get("mapN") == 8,
+                  f"{_secs} · {gp.get('len')}")
+            check("改主歌段数会即时重算(2 段→1 段少一段主歌)",
+                  gp.get("secs2") == 7, str(gp.get("secs2")))
+            check("参数超界被夹紧(前奏 99 秒→30 秒,不是 99 秒)",
+                  "48 小节" in str(gp.get("lenClamp")), str(gp.get("lenClamp")))
+
+            # ---- 组合模板 / 分类标签 / 段落内小标签(耳语·独白·电话音…) ----
+            gtag = await c.ev(
+                "(async()=>{"
+                "const p=document.getElementById('genPanel');p.hidden=false;"
+                "const pump=setInterval(()=>{const b=document.querySelector('.uiwrap .uik');"
+                "if(b)b.click();},25);"
+                "const ta=document.getElementById('genPrompt');"
+                "const lyr=document.getElementById('genLyrics');"
+                "const vocal=document.getElementById('genVocal');"
+                "vocal.checked=true;vocal.dispatchEvent(new Event('change'));"
+                "ta.value='';ta.dispatchEvent(new Event('input'));"
+                "const pre=document.querySelectorAll('#genPresets [data-preset]');"
+                "const nPre=pre.length;"
+                "pre[0].click();"
+                "await new Promise(r=>setTimeout(r,160));"
+                "const brief=ta.value;"
+                "const briefLen=brief.length;"
+                "ta.value='trap';ta.dispatchEvent(new Event('input'));"
+                "const mood=document.querySelector('#genMoods .gchip');mood.click();"
+                "const afterTag=ta.value;"
+                "mood.click();"
+                "const afterDup=ta.value;"
+                "const instr=document.querySelector('#genInstrs .gchip');instr.click();"
+                "const afterInstr=ta.value;"
+                "lyr.value='';lyr.dispatchEvent(new Event('input'));"
+                "const fx=[...document.querySelectorAll('#genFxChips [data-sec]')]"
+                ".map(b=>b.dataset.sec);"
+                "document.querySelector('#genFxChips [data-sec=\"Whisper\"]').click();"
+                "const lyrFx=lyr.value;"
+                "const fs=document.getElementById('genForm');"
+                "const nForms=fs.options.length;"
+                "fs.value='rapfull';fs.dispatchEvent(new Event('change'));"
+                "const rapSecs=[...document.querySelectorAll('#genFormChips [data-sec]')]"
+                ".map(b=>b.dataset.sec);"
+                "fs.value='story';fs.dispatchEvent(new Event('change'));"
+                "const storySecs=[...document.querySelectorAll('#genFormChips [data-sec]')]"
+                ".map(b=>b.dataset.sec);"
+                "const storyLbl=document.querySelector('#genFormChips [data-sec=\"Spoken\"]')"
+                "?document.querySelector('#genFormChips [data-sec=\"Spoken\"]').textContent:'';"
+                "clearInterval(pump);"
+                "p.hidden=true;"
+                "return {nPre,briefLen,bpm:/\\d+\\s?bpm/i.test(brief),afterTag,afterDup,"
+                "afterInstr,fx,lyrFx,nForms,rapSecs,storySecs,storyLbl};})()",
+                await_promise=True, timeout=40)
+            gt = gtag if isinstance(gtag, dict) else {}
+            check("组合模板:一整套风格说明一键填满(≥6 条,含 BPM/乐器/人声处理)",
+                  gt.get("nPre", 0) >= 6 and gt.get("briefLen", 0) >= 60
+                  and gt.get("bpm") is True,
+                  f"{gt.get('nPre')} 条 · {gt.get('briefLen')} 字 · 带 BPM={gt.get('bpm')}")
+            check("单项标签接在风格说明后面,重复点不会出现两遍",
+                  gt.get("afterTag") == "trap, 温暖、治愈"
+                  and gt.get("afterDup") == "trap, 温暖、治愈",
+                  f"{gt.get('afterTag')!r} → {gt.get('afterDup')!r}")
+            check("不同分类(流派/情绪/乐器/人声/节奏)都能续着接",
+                  gt.get("afterInstr") == "trap, 温暖、治愈, Rhodes 电钢",
+                  repr(gt.get("afterInstr")))
+            check("段落内小标签够全(说唱/独奏/耳语/独白/机器人/电话音/磁带底噪/人群)",
+                  {"Rap", "Solo", "Whisper", "Spoken", "Robot Voice", "Telephone",
+                   "Tape Hiss", "Crowd"} <= set(gt.get("fx") or []),
+                  str(gt.get("fx")))
+            check("点「耳语」把 [Whisper] 插进歌词光标处",
+                  "[Whisper]" in str(gt.get("lyrFx")), repr(gt.get("lyrFx"))[:40])
+            check("结构模板新增说唱多段/叙事/耳语/现场/器乐独奏",
+                  gt.get("nForms", 0) >= 18
+                  and "Rap" in (gt.get("rapSecs") or [])
+                  and "Spoken" in (gt.get("storySecs") or [])
+                  and "独白" in str(gt.get("storyLbl")),
+                  f"{gt.get('nForms')} 个 · rapfull={gt.get('rapSecs')} · "
+                  f"story 独白={gt.get('storyLbl')}")
+
+            # ---- 组合模板库:65 条 + 分类筛选 + 搜索(只读,不试听、不花钱) ----
+            glib = await c.ev(
+                "(async()=>{const p=document.getElementById('genPanel');p.hidden=false;"
+                "document.getElementById('genLibOpen').click();"
+                "await new Promise(r=>setTimeout(r,250));"
+                "const rows=()=>document.querySelectorAll('#libList .librow').length;"
+                "const all=rows();"
+                "const cats=document.querySelectorAll('#libCats .libcat').length;"
+                "const cnt=document.getElementById('libCount').textContent;"
+                "const s=document.getElementById('libSearch');"
+                "s.value='古风';s.dispatchEvent(new Event('input'));"
+                "const f1=rows();"
+                "s.value='zzzznomatchx';s.dispatchEvent(new Event('input'));"
+                "const f2=rows();"
+                "s.value='';s.dispatchEvent(new Event('input'));"
+                "document.querySelector('#libCats [data-cat=\\'rap\\']').click();"
+                "const rap=rows();"
+                "document.querySelector('#libCats [data-cat=\\'all\\']').click();"
+                "document.getElementById('libClose').click();"
+                "p.hidden=true;"
+                "return {all,cats,cnt,f1,f2,rap,back:rows()};})()",
+                await_promise=True, timeout=40)
+            gl = glib if isinstance(glib, dict) else {}
+            check("组合模板库:一共 65 条,12 个分类 + 「全部」",
+                  gl.get("all") == 65 and gl.get("cats") == 13
+                  and "65" in str(gl.get("cnt")),
+                  f"{gl.get('all')} 条 · {gl.get('cats')} 个分类 · 计数 {gl.get('cnt')!r}")
+            check("模板库搜索真的在筛(古风 < 全量,乱码 → 0 条)",
+                  0 < gl.get("f1", 0) < 65 and gl.get("f2") == 0
+                  and gl.get("back") == 65,
+                  f"古风 {gl.get('f1')} · 乱码 {gl.get('f2')} · 清空回来 {gl.get('back')}")
+            check("模板库按分类筛:说唱 6 条",
+                  gl.get("rap") == 6, f"{gl.get('rap')} 条")
+
+            # ---- 新手引导:四步走完 / 上一步 / 关掉后记住 ----
+            gob = await c.ev(
+                "(async()=>{STUDIO.guide(0);await new Promise(r=>setTimeout(r,80));"
+                "const s0=STUDIO.guideState();"
+                "document.getElementById('obNext').click();"
+                "await new Promise(r=>setTimeout(r,40));"
+                "const s1=STUDIO.guideState();"
+                "document.getElementById('obBack').click();"
+                "await new Promise(r=>setTimeout(r,40));"
+                "const s2=STUDIO.guideState();"
+                "for(let i=0;i<4;i++){document.getElementById('obNext').click();"
+                "await new Promise(r=>setTimeout(r,40));}"
+                "const s3=STUDIO.guideState();"
+                "return {s0,s1,s2,s3,flag:localStorage.getItem('singmic.onboard.v1')};})()",
+                await_promise=True, timeout=30)
+            go = gob if isinstance(gob, dict) else {}
+            s0, s1, s2, s3 = (go.get("s0") or {}), (go.get("s1") or {}), \
+                             (go.get("s2") or {}), (go.get("s3") or {})
+            check("新手引导:四步,每步都有标题和要点",
+                  s0.get("open") is True and s0.get("total") == 4
+                  and s0.get("points", 0) >= 3 and bool(s0.get("title")),
+                  f"第 {s0.get('step')} 步 · {s0.get('points')} 条 · {s0.get('title')!r}")
+            check("新手引导:下一步 / 上一步都对",
+                  s1.get("step") == 1 and s1.get("title") != s0.get("title")
+                  and s2.get("step") == 0 and s2.get("title") == s0.get("title"),
+                  f"1:{s1.get('step')} · back:{s2.get('step')}")
+            check("新手引导:走完自动关,并记住「下次不再自动显示」",
+                  s3.get("open") is False and go.get("flag") == "1",
+                  f"open={s3.get('open')} · flag={go.get('flag')!r}")
+
+            # ---- 设置:八个分页 + 偏好真的写进本机 + 关于页的版号/协议 ----
+            gset = await c.ev(
+                "(async()=>{document.getElementById('btnSettings').click();"
+                "await new Promise(r=>setTimeout(r,250));"
+                "const nav=[...document.querySelectorAll('#setNav .setitem')]"
+                ".map(b=>b.dataset.sec);"
+                "const body=document.getElementById('setBody');"
+                "const heads={};"
+                "for(const b of document.querySelectorAll('#setNav .setitem')){"
+                "b.click();await new Promise(r=>setTimeout(r,180));"
+                "heads[b.dataset.sec]=body.querySelector('h3')?.textContent||'';}"
+                "document.querySelector('#setNav [data-sec=\\'prefs\\']').click();"
+                "await new Promise(r=>setTimeout(r,120));"
+                "const st=document.getElementById('prefStage');"
+                "st.value='note';"
+                "st.dispatchEvent(new Event('change',{bubbles:true}));"
+                "const mode1=document.getElementById('blockMode').value;"
+                "const prefs1=JSON.parse(localStorage.getItem('singmic.prefs.v1')||'{}');"
+                "st.value='syllable';"
+                "st.dispatchEvent(new Event('change',{bubbles:true}));"
+                "document.querySelector('#setNav [data-sec=\\'data\\']').click();"
+                "for(let i=0;i<100;i++){await new Promise(r=>setTimeout(r,200));"
+                "if(!/读取中/.test(body.innerText))break;}"
+                "const dataTxt=body.innerText;"
+                "document.querySelector('#setNav [data-sec=\\'about\\']').click();"
+                "await new Promise(r=>setTimeout(r,500));"
+                "const aboutTxt=body.innerText;"
+                "document.getElementById('setClose').click();"
+                "return {nav,heads,mode1,prefs1,dataTxt,aboutTxt,"
+                "closed:document.getElementById('settings').hidden};})()",
+                await_promise=True, timeout=40)
+            gs = gset if isinstance(gset, dict) else {}
+            hs = gs.get("heads") or {}
+            want_heads = {"prefs": "偏好设置", "data": "数据与缓存", "manual": "使用手册",
+                          "faq": "常见问题", "keys": "快捷键速查",
+                          "contact": "联系与反馈", "log": "更新日志", "about": ""}
+            # ★ 关于页的标题是**版本名**(社区版/Pro 各一个名字),不写死;
+            #   只要求它是产品名,别的一个字都不许变。
+            ok_heads = all(
+                ("声麦 Studio Pro" in str(hs.get("about"))) if k == "about"
+                else hs.get(k) == v
+                for k, v in want_heads.items())
+            check("设置:八个分页都在,每页都有内容",
+                  gs.get("nav") == list(want_heads.keys()) and ok_heads,
+                  f"{gs.get('nav')} · {hs}")
+            check("偏好:改「默认切法」立刻套到左栏,并写进本机 localStorage",
+                  gs.get("mode1") == "note" and (gs.get("prefs1") or {}).get("stage") == "note",
+                  f"blockMode={gs.get('mode1')} · prefs={gs.get('prefs1')}")
+            check("数据与缓存页:缓存量和存放路径都写出来",
+                  "缓存" in str(gs.get("dataTxt")) and "recordings" in str(gs.get("dataTxt"))
+                  and "exports" in str(gs.get("dataTxt")),
+                  str(gs.get("dataTxt"))[:60].replace(chr(10), " "))
+            check("关于页:版号 / GPL-3.0 / 开发者 / 第三方组件",
+                  "1.0.0" in str(gs.get("aboutTxt"))
+                  and "GPL-3.0" in str(gs.get("aboutTxt"))
+                  and "IMXia-Chan" in str(gs.get("aboutTxt"))
+                  and "DeepFilterNet3" in str(gs.get("aboutTxt")),
+                  str(gs.get("aboutTxt"))[:60].replace(chr(10), " "))
+            check("设置:点 × 关掉", gs.get("closed") is True)
+
+            # ---- 偏好存到本机文件(不在浏览器里):换壳 / 换浏览器不丢 ----
+            def _prefs(method="GET", body=None):
+                st, raw = http("/api/studio/prefs", method,
+                               None if body is None else json.dumps(body).encode(),
+                               "application/json" if body is not None else "")
+                try:
+                    return st, json.loads(raw)
+                except Exception:                     # noqa: BLE001
+                    return st, {}
+            _st0, _p0 = _prefs()
+            _before = _p0.get("prefs") or {}
+            # ★ 量具不许留副作用:这文件是「这台电脑的真设置」,测试前没有就测完删掉,
+            #   否则跑一次冒烟就把默认值焊死进配置文件,压过用户自己在浏览器里选的。
+            _pf = Path(_p0.get("path") or "")
+            _had = PREFS_HAD
+            _prefs("POST", {"prefs": {"confirmCost": True}})
+            _st1, _p1 = _prefs()
+            # 非法值:切法只认 syllable/note,额外的键一律不落盘
+            _prefs("POST", {"prefs": {"stage": "bogus", "evil": 1}})
+            _st2, _p2 = _prefs()
+            _prefs("POST", {"prefs": {"confirmCost": _before.get("confirmCost", False)}})
+            check("偏好存进 ~/.singmic/prefs.json:合并写,非法值被丢",
+                  _st1 == 200
+                  and (_p1.get("prefs") or {}).get("confirmCost") is True
+                  and (_p2.get("prefs") or {}).get("stage") == _before.get("stage")
+                  and "evil" not in (_p2.get("prefs") or {}),
+                  f"{_p1.get('prefs')} · 非法后={_p2.get('prefs')} · {_p1.get('path')}")
+            if not _had and str(_pf):
+                try:
+                    _pf.unlink(missing_ok=True)   # 原来没有就还回去,别留测试造的文件
+                except OSError:
+                    pass
+
+            # ---- 界面语言:设置里能换,换了真的换字,切回来原样还原 ----
+            # ★ 这条同时验证三件事:字典文件真的能加载、DOM 改写生效、还原不残留译文。
+            gl = await c.ev(
+                "(async()=>{"
+                "const m=await import('/static/studio/i18n.js');"
+                "const read=()=>(document.getElementById('btnRecRefresh')||{}).textContent||'';"
+                "const zh0=read();"
+                "await m.setLang('en');"
+                "await new Promise(r=>setTimeout(r,120));"
+                "const en=read();"
+                # ★ 手册里那条「手机录音」是**唯一靠整段 HTML 查表**的文案(键里带 <b><code>,
+                #   漏一个空格就永远翻不出来,界面上还看不出错)。这里直接查它的键。
+                "const k1=\"<b>手机录音</b>：用手机自带的录音功能或任意录音 App 录好后，"
+                "把文件传到电脑，从「媒体 → 导入」加入工程；桌面版只在电脑本机提供服务，手机不能直连。\";"
+                "const phoneEn=m.t(k1);"
+                "await m.setLang('ja');"
+                "await new Promise(r=>setTimeout(r,120));"
+                "const ja=read();"
+                "await m.setLang('zh-Hans');"
+                "await new Promise(r=>setTimeout(r,120));"
+                "return {zh0,en,ja,back:read(),phoneEn,langs:m.LANGS.map(l=>l.id),"
+                "htmlLang:document.documentElement.lang};})()",
+                await_promise=True, timeout=30)
+            gl = gl if isinstance(gl, dict) else {}
+            check("界面语言:五种可选,切英文/日文真的换字,切回来还原",
+                  gl.get("langs") == ["zh-Hans", "zh-Hant", "en", "ja", "ko"]
+                  and gl.get("zh0") == "刷新"
+                  and gl.get("en") not in ("", "刷新")
+                  and gl.get("ja") not in ("", "刷新", gl.get("en"))
+                  and gl.get("back") == "刷新",
+                  str(gl))
+            check("界面语言:手册里那条「手机录音」整段 HTML 能查到英文译文",
+                  str(gl.get("phoneEn", "")).startswith("<b>Phone recordings</b>"),
+                  str(gl.get("phoneEn", ""))[:60])
+            # 设置页里那个下拉框:跟随系统 + 五种语言 = 6 项
+            glp = await c.ev(
+                "(async()=>{"
+                "const s=document.getElementById('prefLang');"
+                "if(!s){document.getElementById('btnSettings').click();"
+                "await new Promise(r=>setTimeout(r,250));"
+                "document.querySelector('#setNav [data-sec=\\'prefs\\']').click();"
+                "await new Promise(r=>setTimeout(r,150));}"
+                "const el=document.getElementById('prefLang');"
+                "const out={n:el?el.options.length:0,"
+                "vals:el?[...el.options].map(o=>o.value):[],"
+                "sel:el?el.value:null};"
+                "document.getElementById('setClose')?.click();"
+                "return out;})()",
+                await_promise=True, timeout=20)
+            glp = glp if isinstance(glp, dict) else {}
+            check("设置里有「界面语言」下拉:跟随系统 + 五种语言",
+                  glp.get("n") == 6
+                  and glp.get("vals") == ["", "zh-Hans", "zh-Hant", "en", "ja", "ko"],
+                  str(glp))
+
+            # ---- 工程文件带身份:桌面版 / 别的工具靠这两个字段认版本 ----
+            _stp, _rawp = http("/api/studio/projects/_smoke_proj")
+            _jp = (json.loads(_rawp).get("project") or {}) if _stp == 200 else {}
+            check("工程文件带身份:format + version(装壳之后靠它认版本)",
+                  _jp.get("format") == "singmic-project" and int(_jp.get("version") or 0) >= 1,
+                  f"format={_jp.get('format')} · version={_jp.get('version')}")
+
+            # ---- 点面板外面就收(他要的:不用非得找那个 ×)+ 面板带了科技外壳 ----
+            fsx = await c.ev(
+                "(async()=>{"
+                "const sc=()=>document.getElementById('fxScrim');"
+                "const pan=document.getElementById('settings');"
+                "const ids=['autoPanel','refPanel','voicePanel','extPanel','nlPanel',"
+                "  'genPanel','genLib','drumPanel','expPanel'];"
+                "document.getElementById('btnSettings').click();"
+                "await new Promise(r=>setTimeout(r,420));"
+                "const cv=pan.querySelector('.fxflow');"   # 粒子层在**面板里**,不在 scrim
+                "const a={open:!pan.hidden, scrim:!sc().hidden, z:sc().style.zIndex,"
+                "  fx:pan.classList.contains('fxpanel'), scan:!!pan.querySelector('.fxscan'),"
+                "  corner:!!pan.querySelector('.fxcorner'), canvas:!!cv, inPanel:!!cv&&cv.parentElement===pan,"
+                "  glass:(getComputedStyle(pan).backdropFilter||'').indexOf('blur')>=0,"
+                "  bg:getComputedStyle(pan).backgroundColor};"
+                # 粒子到底画没画:数 canvas 上的非零 alpha 像素,别只看元素在不在
+                "a.pixel=(()=>{try{const c=cv.getContext('2d');"
+                "  const d=c.getImageData(0,0,cv.width,cv.height).data;let n=0;"
+                "  for(let i=3;i<d.length;i+=4)if(d[i])n++;return n;}catch(e){return -1;}})();"
+                "document.querySelector('#setNav [data-sec=\\'faq\\']').click();"
+                "await new Promise(r=>setTimeout(r,220));"
+                "a.inside=!pan.hidden;"                      # 点面板里面不许误关
+                "sc().click();"
+                "await new Promise(r=>setTimeout(r,420));"
+                "a.closed=pan.hidden; a.scrimGone=sc().hidden;"
+                # 别的面板还开着 ⇒ scrim 本来就该留着(它服务的是「还有面板开着」)
+                "a.others=ids.filter(i=>!document.getElementById(i).hidden);"
+                "return a;})()", await_promise=True)
+            fsk = fsx if isinstance(fsx, dict) else {}
+            # 前面几步可能留着别的面板开着,这时 scrim 留着是**对的**;
+            # 一个都不剩时它才必须收起来。
+            _scrim_ok = (fsk.get("scrimGone") is False) if fsk.get("others") \
+                else (fsk.get("scrimGone") is True)
+            check("点面板外面就收:scrim 出现、点它就关、点面板里不关",
+                  fsk.get("open") is True and fsk.get("scrim") is True
+                  and fsk.get("inside") is True and fsk.get("closed") is True
+                  and _scrim_ok,
+                  f"{fsk}")
+            check("面板外壳:科技边框 + 扫描带 + 四角括号挂上了",
+                  fsk.get("fx") is True and fsk.get("scan") is True
+                  and fsk.get("corner") is True,
+                  f"fx={fsk.get('fx')} · scan={fsk.get('scan')} · z={fsk.get('z')}")
+            # 玻璃:必须是真 backdrop-filter(不是画的假磨砂),底色必须半透明
+            _bg = str(fsk.get("bg") or "")
+            _alpha = 1.0
+            try:
+                _alpha = float(_bg.rsplit(",", 1)[1].rstrip(")").strip()) if "," in _bg else 1.0
+            except (ValueError, IndexError):
+                pass
+            # ★ alpha 必须落在 (0, 0.9):0 说明根本没设底色(量具会假通过)
+            check("磨砂玻璃:面板真 blur 了背景 + 底色半透明",
+                  fsk.get("glass") is True and 0.05 < _alpha < 0.9,
+                  f"blur={fsk.get('glass')} · bg={_bg}")
+            check("面板里的粒子流:canvas 是面板的孩子且真的画上了",
+                  fsk.get("canvas") is True and fsk.get("inPanel") is True
+                  and isinstance(fsk.get("pixel"), int) and fsk.get("pixel", 0) > 200,
+                  f"canvas={fsk.get('canvas')} · 在面板里={fsk.get('inPanel')} · 亮像素={fsk.get('pixel')}")
+
+            # ---- 生成:面板选的平台必须原样发给后端(以前只认「最后存过 key 的平台」) ----
+            gpost = await c.ev(
+                "(async()=>{const orig=window.fetch,oc=window.confirm;const seen=[];"
+                "const pump=setInterval(()=>{const b=document.querySelector('.uiwrap .uik');"
+                "if(b)b.click();},25);"
+                "window.fetch=async(url,opts)=>{const u=String(url);let body=null;"
+                "try{body=opts&&opts.body?JSON.parse(opts.body):null;}catch(e){}"
+                "seen.push({u,body});"
+                "const data=u.includes('/gen/create')?{taskId:'t_probe',provider:'bailian'}:{};"
+                "return {ok:true,headers:{get:()=>'application/json'},"
+                "json:async()=>data,text:async()=>''};};"
+                "try{"
+                "const p=document.getElementById('genPanel');p.hidden=false;"
+                "const prov=document.getElementById('genProvider');prov.value='bailian';"
+                "prov.dispatchEvent(new Event('change'));"
+                "document.getElementById('genVocal').checked=true;"
+                "document.getElementById('genVocal').dispatchEvent(new Event('change'));"
+                "const lyr=document.getElementById('genLyrics');"
+                "lyr.value='夜色落在窗台上,我还是没有睡。';lyr.dispatchEvent(new Event('input'));"
+                "document.getElementById('genGo').click();"
+                "await new Promise(r=>setTimeout(r,220));"
+                "clearInterval(pump);"
+                "const body=(seen.find(x=>x.u.includes('/gen/create'))||{}).body||{};"
+                "const busy=document.getElementById('genGo').disabled;"
+                "document.getElementById('genClose').click();"
+                "return {provider:body.provider,instrumental:body.instrumental,"
+                "lyrics:!!body.lyrics,promptLen:(body.prompt||'').length,busy:busy};"
+                "}finally{window.fetch=orig;clearInterval(pump);"
+                "document.getElementById('genPanel').hidden=true;}})()",
+                await_promise=True, timeout=40)
+            gp = gpost if isinstance(gpost, dict) else {}
+            check("生成:平台/人声/歌词按面板发出去,生成中按钮被按住",
+                  gp.get("provider") == "bailian" and gp.get("instrumental") is False
+                  and gp.get("lyrics") and gp.get("promptLen", 0) > 0 and gp.get("busy"),
+                  str(gp))
+
             cache = await c.ev("STUDIO.cacheInfo()", await_promise=True)
             check("缓存占用报得出来", isinstance(cache, dict) and "mb" in cache, str(cache))
 
@@ -2506,6 +3297,23 @@ async def main() -> int:
             proc.wait(timeout=5)
         except Exception:                   # noqa: BLE001
             proc.kill()
+        # ★ Edge 会派生出**脱离父进程**的子进程,只 terminate 父进程会留下一整窝
+        #   (实测跑七轮积了 40 个,持续吃 CPU)。先按进程树杀,再按本轮调试端口收尾。
+        try:
+            subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)],
+                           capture_output=True, timeout=15)
+        except Exception:                   # noqa: BLE001
+            pass
+        try:
+            subprocess.run(
+                ["powershell", "-NoProfile", "-Command",
+                 "Get-CimInstance Win32_Process -Filter \"Name='msedge.exe'\" | "
+                 f"Where-Object {{ $_.CommandLine -match 'remote-debugging-port={DBG}' }} | "
+                 "ForEach-Object { Stop-Process -Id $_.ProcessId -Force "
+                 "-ErrorAction SilentlyContinue }"],
+                capture_output=True, timeout=25)
+        except Exception:                   # noqa: BLE001
+            pass
         import shutil
         shutil.rmtree(tmp, ignore_errors=True)
         # 歌库是这个测试自己往里塞的 —— 收工时删掉,别让「歌库」变成垃圾场

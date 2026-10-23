@@ -84,7 +84,7 @@ python3 -c "import torch;print(torch.cuda.is_available())"   # 要 True
 在**本机**上把录音传上去(或者你直接把文件拖进云厂商的网页终端):
 
 ```bash
-scp -r D:/singmic/recordings root@<公网IP>:/data/raw
+scp -r <本机项目目录>/recordings root@<公网IP>:/data/raw
 ```
 
 在云上:
@@ -137,7 +137,7 @@ python3 /opt/singmic/export_model.py --exp myvoice --out /data/model.zip \
 然后:
 
 1. **上传到对象存储**(OSS/COS):控制台里建 bucket(私有读),上传 `model.zip`。
-2. **下载回本机**:`scp root@<IP>:/data/model.zip D:/singmic/voice_model/`
+2. **下载回本机**:`scp root@<IP>:/data/model.zip <本机项目目录>/voice_model/`
 3. **给数据盘打快照**:控制台 → 云盘 → 创建快照(训练完这一次必须打)。
 
 `model.zip` 和 `.singmic/cloud.json` 都**不要进 git**。

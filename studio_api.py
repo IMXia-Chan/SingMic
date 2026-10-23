@@ -19,16 +19,19 @@ from pathlib import Path
 
 import numpy as np
 import soundfile as sf
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, Response
 
+import edition
 import studio_asr
 import studio_auto
 import studio_external
 import studio_fx
+import studio_gen
 import studio_mix as sm
 import studio_nl
 import studio_ref
+import studio_release
 import studio_vst
 import studio_voice
 import tuning
@@ -51,6 +54,15 @@ _CACHE_RE = re.compile(r"^(clip|track)_[0-9a-f]{20}\.wav$")
 router = APIRouter(prefix="/api/studio", tags=["studio"])
 _pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="studio")
 _inflight: dict[str, asyncio.Future] = {}
+
+
+def _pro(feature: str):
+    """Pro 独有接口的守卫。社区版一律 403,界面会先灰掉按钮,这里是第二道。"""
+    def _dep() -> None:
+        if not edition.is_pro():
+            raise HTTPException(
+                403, f"「{feature}」是 Pro 版功能,当前为社区版。")
+    return Depends(_dep)
 
 
 # ---------------------------------------------------------------------------
@@ -106,15 +118,16 @@ async def voice_status(force: int = 0) -> dict:
     loop = asyncio.get_running_loop()
     if force:
         return await loop.run_in_executor(_pool, lambda: _voice_status_fresh())
-    return await loop.run_in_executor(_pool, studio_voice.status)
+    return await loop.run_in_executor(
+        _pool, functools.partial(studio_voice.status, edition.is_pro()))
 
 
 def _voice_status_fresh() -> dict:
     studio_voice._HEALTH["t"] = 0.0
-    return studio_voice.status()
+    return studio_voice.status(edition.is_pro())
 
 
-@router.post("/voice/config")
+@router.post("/voice/config", dependencies=[_pro("个人音色补音")])
 async def voice_config(req: Request) -> dict:
     body = await req.json()
     try:
@@ -126,7 +139,7 @@ async def voice_config(req: Request) -> dict:
     return await loop.run_in_executor(_pool, studio_voice.status)
 
 
-@router.post("/voice/config/clear")
+@router.post("/voice/config/clear", dependencies=[_pro("个人音色补音")])
 async def voice_config_clear() -> dict:
     studio_voice.clear_token()
     return studio_voice.cfg_view()
@@ -146,9 +159,10 @@ async def voice_extend(req: Request) -> dict:
     if target <= 0:
         raise HTTPException(400, "目标时长要大于 0")
     loop = asyncio.get_running_loop()
+    # ★ 社区版只有本地补音:连同「云端可用时自动升级」这条路一起关掉
     r = await loop.run_in_executor(
         _pool, studio_voice.extend, p, rel, a, b, target, MEDIA,
-        bool(body.get("local")))
+        bool(body.get("local")) or not edition.is_pro())
     if not r.get("ok"):
         raise HTTPException(400, r.get("reason") or "补音失败")
     return r
@@ -157,12 +171,12 @@ async def voice_extend(req: Request) -> dict:
 # ---------------------------------------------------------------------------
 # 自然语言调参(DeepSeek):只回动作清单,不改工程;key 只写不读
 # ---------------------------------------------------------------------------
-@router.get("/nl/status")
+@router.get("/nl/status", dependencies=[_pro("调音助手")])
 async def nl_status() -> dict:
     return studio_nl.status()
 
 
-@router.post("/nl/key")
+@router.post("/nl/key", dependencies=[_pro("调音助手")])
 async def nl_key(req: Request) -> dict:
     body = await req.json()
     try:
@@ -173,12 +187,12 @@ async def nl_key(req: Request) -> dict:
         raise HTTPException(400, str(e))
 
 
-@router.post("/nl/key/clear")
+@router.post("/nl/key/clear", dependencies=[_pro("调音助手")])
 async def nl_key_clear() -> dict:
     return studio_nl.clear_key()
 
 
-@router.post("/nl_plan")
+@router.post("/nl_plan", dependencies=[_pro("调音助手")])
 async def nl_plan(req: Request) -> dict:
     body = await req.json()
     proj = _resolve_project(body)
@@ -229,19 +243,55 @@ def _out_sr(b: dict) -> int:
     return sr
 
 
-def _mix_with_vst(project, normalize, start, end, loudness):
+# ★ mp3 会抬真峰:lame 编出来的波形重建过,解码后实测比 wav 高 0.2~0.3 dB。
+#   所以 mp3 交付按 -1.6 dBTP 限,给编码留余量;wav 就按发行线 -1.0。
+MP3_CEILING_DB = -1.6
+WAV_CEILING_DB = -1.0
+
+
+def _ceiling_for(fmt: str) -> float:
+    return MP3_CEILING_DB if str(fmt).lower() == "mp3" else WAV_CEILING_DB
+
+
+def _mix_with_vst(project, normalize, start, end, loudness, sr: int = None,
+                  ceiling: float = WAV_CEILING_DB,
+                  normalize_db: float | None = None):
+    """整曲混音。★ sr 可指定(发行要 44.1k 时直接按 44.1k 渲染,
+    别在 48k 渲完再降一次采样 —— 那是多一道重采样)。"""
+    sr = int(sr or sm.SR)
     if studio_vst.project_has_vst(project):
         with studio_vst.VstHost() as host:
-            return sm.mix_project(project, sm.SR, normalize, start, end,
-                                  loudness, vst=host)
-    return sm.mix_project(project, sm.SR, normalize, start, end, loudness)
+            return sm.mix_project(project, sr, normalize, start, end,
+                                  loudness, vst=host, ceiling=ceiling,
+                                  normalize_db=normalize_db)
+    return sm.mix_project(project, sr, normalize, start, end, loudness,
+                          ceiling=ceiling, normalize_db=normalize_db)
 
 
-def _stems_with_vst(project, stage, start, end):
+def _peak_db_of(body: dict) -> float | None:
+    """「留多少余量」:给唱片公司/母带师的混音,峰压到 -6 dBFS 而不是 -1。
+
+    ★ 只在**不归一响度**时生效 —— 你要 -14 LUFS 就说明你要成品,
+      那时候峰该由限幅器兜,不是留余量。
+    """
+    v = body.get("peak_db", None)
+    if v in (None, "", "off"):
+        return None
+    try:
+        db = float(v)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "peak_db 只收数字(比如 -6)")
+    if not -60.0 <= db <= 0.0:
+        raise HTTPException(400, "peak_db 只收 -60 ~ 0 dBFS")
+    return db
+
+
+def _stems_with_vst(project, stage, start, end, sr: int = None):
+    sr = int(sr or sm.SR)
     if stage == "post" and studio_vst.project_has_vst(project):
         with studio_vst.VstHost() as host:
-            return sm.render_stems(project, sm.SR, stage, start, end, vst=host)
-    return sm.render_stems(project, sm.SR, stage, start, end)
+            return sm.render_stems(project, sr, stage, start, end, vst=host)
+    return sm.render_stems(project, sr, stage, start, end)
 
 
 @router.get("/vst/plugins")
@@ -447,6 +497,20 @@ def _probe(p: Path) -> dict:
         return {"exists": False, "sr": 0, "ch": 0, "dur": 0.0}
 
 
+def _level_db(p: Path, max_sec: float = 120.0) -> float:
+    """整条音轨的 RMS 电平(dBFS)。拆轨后用来判断哪一轨其实是空的。"""
+    try:
+        i = sf.info(str(p))
+        n = int(min(i.frames, i.samplerate * max_sec))
+        x, _ = sf.read(str(p), start=0, frames=n, dtype="float32", always_2d=True)
+        if not x.size:
+            return -120.0
+        rms = float(np.sqrt(np.mean(np.square(x, dtype=np.float64))))
+        return round(20 * np.log10(max(rms, 1e-6)), 1)
+    except Exception:                      # noqa: BLE001
+        return -120.0
+
+
 # ---------------------------------------------------------------------------
 # 工程 CRUD
 # ---------------------------------------------------------------------------
@@ -462,6 +526,9 @@ async def list_projects() -> dict:
         out.append({
             "name": j.get("name") or p.stem,
             "title": j.get("title") or "",
+            # 格式身份/版本也吐出来:换壳之后列表要能一眼看出「这条是不是我读得了的工程」
+            "format": j.get("format") or "singmic-project",
+            "version": int(j.get("version") or 1),
             "rev": int(j.get("rev") or 0),
             "bpm": j.get("bpm") or 120,
             "lengthSec": j.get("lengthSec") or 0,
@@ -517,6 +584,9 @@ async def put_project(name: str, request: Request) -> dict:
 
     j["rev"] = old_rev + 1
     j["name"] = name
+    # ★ 工程格式是**对外契约**(桌面版 / 别的工具都要读):身份 + 格式版本各留一个字段。
+    #   老工程没有这两个键,补上默认值算「同一版」,不算迁移。
+    j.setdefault("format", "singmic-project")
     j.setdefault("version", 1)
 
     tmp = p.with_name(p.name + ".part")
@@ -746,7 +816,7 @@ def _auto_work(proj: dict, scopes, tune: bool) -> dict:
     return studio_auto.auto_mix(proj, scopes, tune, None)
 
 
-@router.post("/auto_mix")
+@router.post("/auto_mix", dependencies=[_pro("一键调音")])
 async def auto_mix(request: Request) -> dict:
     """一键调音:**只出方案**,不写工程。前端勾选后自己应用 + 一次撤销。
 
@@ -770,7 +840,7 @@ async def auto_mix(request: Request) -> dict:
         _pool, functools.partial(_auto_work, proj, scopes, tune))
 
 
-@router.post("/reference/analyze")
+@router.post("/reference/analyze", dependencies=[_pro("跟原唱")])
 async def reference_analyze(request: Request) -> dict:
     """按原唱矫正:**只出方案**,不写工程。
 
@@ -807,7 +877,7 @@ async def reference_analyze(request: Request) -> dict:
         raise HTTPException(400, str(e))
 
 
-@router.post("/reference/separate")
+@router.post("/reference/separate", dependencies=[_pro("AI 伴奏")])
 async def reference_separate(request: Request) -> dict:
     """用 Demucs 把一条带伴奏的音频分成「人声 / 伴奏」。CPU,慢;结果按源缓存。
 
@@ -861,7 +931,68 @@ async def reference_separate(request: Request) -> dict:
             "sec_cost": r.get("sec_cost", 0)}
 
 
-@router.get("/reference/library")
+@router.post("/reference/stems", dependencies=[_pro("AI 伴奏")])
+async def reference_stems(request: Request) -> dict:
+    """把一条伴奏拆成多轨(Demucs)。`model` = "4"(默认) 或 "6"(多吉他/钢琴)。CPU,慢。
+
+    body: {source: "projects/media/xxx.wav", model: "4"|"6"}
+        → {sources:[...], cached, sec_cost, model}
+    """
+    try:
+        body = await request.json()
+    except Exception:                      # noqa: BLE001
+        raise HTTPException(400, "要发 JSON")
+    src = safe_source(str(body.get("source") or ""))
+    ok, why = studio_ref.demucs_available()
+    if not ok:
+        raise HTTPException(400, f"{studio_ref.MSG_DEMUCS}({why})")
+    key = "6" if str(body.get("model") or "4") == "6" else "4"
+
+    # ★ ident 必须带上档位:四轨和六轨是两张不同的网络,鼓/贝斯这些同名轨
+    #   内容并不相同。不带的话先拆四轨再拆六轨会把四轨那批文件覆盖掉,
+    #   之后四轨反而"命中缓存"拿到六轨的音频。
+    ident = hashlib.sha1(
+        f"{src}|{src.stat().st_size}:{src.stat().st_mtime_ns}|{key}"
+        .encode("utf-8")).hexdigest()[:8]
+    stem = Path(src.name).stem
+    LABEL = {"drums": "鼓", "bass": "贝斯", "other": "其他", "vocals": "人声",
+             "guitar": "吉他", "piano": "钢琴"}
+    names = studio_ref.STEM_MODELS[key][1]
+    dsts = {k: MEDIA / f"{ident}_{stem}_{LABEL[k]}.wav" for k in names}
+
+    def _outs() -> list:
+        out = []
+        for k in names:
+            out.append({"stem": k, "path": _rel(dsts[k]), "name": dsts[k].name,
+                        "kind": "voice" if k == "vocals" else "audio",
+                        "db": _level_db(dsts[k]), **_probe(dsts[k])})
+        return out
+
+    if all(p.exists() for p in dsts.values()):
+        return {"ok": True, "sources": _outs(), "cached": True, "sec_cost": 0, "model": key}
+
+    out_dir = PROJECTS / "tmp" / f"stems_{ident}"
+    loop = asyncio.get_running_loop()
+    try:
+        r = await loop.run_in_executor(
+            _pool, functools.partial(studio_ref.separate_stems, src, out_dir, model=key))
+    except studio_ref.RefError as e:
+        raise HTTPException(400, str(e))
+    try:
+        for k, dst in dsts.items():
+            p = Path(r[k])
+            tmp = dst.with_name(dst.name + ".part")
+            tmp.write_bytes(p.read_bytes())
+            tmp.replace(dst)
+    except OSError as e:
+        raise HTTPException(500, f"读不出 Demucs 的输出:{e}")
+    import shutil
+    shutil.rmtree(out_dir, ignore_errors=True)
+    return {"ok": True, "sources": _outs(), "cached": False,
+            "sec_cost": r.get("sec_cost", 0), "model": key}
+
+
+@router.get("/reference/library", dependencies=[_pro("跟原唱")])
 async def reference_library(role: str = "ref") -> dict:
     """歌库里有哪些歌。★ 只列派生数据(音高地图),音频还在 media 里。"""
     import studio_refdb as rdb
@@ -873,7 +1004,7 @@ async def reference_library(role: str = "ref") -> dict:
                      "删掉这里的记录不影响你的音频文件。")}
 
 
-@router.delete("/reference/library/{eid}")
+@router.delete("/reference/library/{eid}", dependencies=[_pro("跟原唱")])
 async def reference_library_delete(eid: str) -> dict:
     import studio_refdb as rdb
     if not re.fullmatch(r"[0-9a-f]{8,32}", eid or ""):
@@ -910,7 +1041,7 @@ def _identify_work(proj: dict, take_id) -> dict:
             "take": {"trackId": take_tr.get("id"), "name": take_tr.get("name")}}
 
 
-@router.post("/reference/identify")
+@router.post("/reference/identify", dependencies=[_pro("跟原唱")])
 async def reference_identify(request: Request) -> dict:
     """拿你这条轨去歌库里认歌:返回最像的几首 + 把握。
 
@@ -1019,15 +1150,24 @@ async def get_preview(name: str) -> FileResponse:
                         headers={"Cache-Control": "no-store"})
 
 
-def _write_mp3(x: np.ndarray, sr: int, dst: Path, kbps: int = 320) -> None:
+def _write_mp3(x: np.ndarray, sr: int, dst: Path, kbps: int = 320,
+               tags: dict | None = None, cover: bytes | None = None,
+               cover_mime: str = "image/jpeg") -> None:
+    """写 mp3。★ 带 ID3v2.3 标签 / 封面 —— 发出去的 demo 才有歌名和封面。
+
+    lameenc 出的是裸 mp3 流,ID3 头得自己拼在前头(见 `studio_release.id3v23`)。
+    """
     import lameenc
+
+    import studio_release as rel
+
     enc = lameenc.Encoder()
     enc.set_bit_rate(int(kbps))
     enc.set_in_sample_rate(int(sr))
-    enc.set_channels(int(x.shape[1]))
+    enc.set_channels(int(np.asarray(x).shape[1]))
     enc.set_quality(2)
     pcm = (np.clip(x, -1.0, 1.0) * 32767.0).astype("<i2")
-    data = enc.encode(pcm.tobytes()) + enc.flush()
+    data = rel.id3v23(tags, cover, cover_mime) + enc.encode(pcm.tobytes()) + enc.flush()
     tmp = dst.with_suffix(".part")
     tmp.write_bytes(data)
     tmp.replace(dst)
@@ -1035,7 +1175,9 @@ def _write_mp3(x: np.ndarray, sr: int, dst: Path, kbps: int = 320) -> None:
 
 _STEMS_README = """SingMic Studio —— 分轨导出(stems)
 
-这个包里每一轨一条单声道 24-bit WAV,采样率与导出主混音相同(默认 48k)。
+这个包里每一轨一条 24-bit WAV,采样率与导出主混音相同(默认 48k)。
+立体声源的轨是**真立体声**(L/R 两条),单声道轨写的是左右相同的两份
+—— 与浏览器把单声道源接进立体声总线时的行为一致。
 
 stage = pre   链路在「插入效果链之前」:已经过轨道增益、片段淡入淡出,
               不含声像(pan),也不含旧的混响 / 延迟支路。
@@ -1071,9 +1213,10 @@ def _write_stems_zip(dst: Path, stems: list[dict], project: dict, sr: int,
             zf.writestr(fn, buf.getvalue())
             tracks.append({"file": fn, "id": st.get("id"), "name": st.get("name"),
                            "samples": int(len(st["audio"])), "sr": sr,
-                           "channels": 1})
+                           "channels": int(getattr(st["audio"], "shape", [0, 1])[1])
+                           if getattr(st["audio"], "ndim", 1) == 2 else 1})
         manifest = {"version": 1, "kind": "stems", "stage": stage,
-                    "sr": sr, "channels": 1, "subtype": "PCM_24",
+                    "sr": sr, "channels": 2, "subtype": "PCM_24",
                     "start": round(float(start), 6),
                     "end": round(float(end), 6),
                     "tracks": tracks, "missing": missing}
@@ -1084,6 +1227,53 @@ def _write_stems_zip(dst: Path, stems: list[dict], project: dict, sr: int,
         zf.writestr("README.txt", _STEMS_README)
     tmp.replace(dst)
     return {"tracks": len(tracks), "missing": missing}
+
+
+COVER_MAX = 8 * 1024 * 1024
+COVER_EXT = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png"}
+_TAG_KEYS = ("title", "artist", "album", "albumArtist", "year", "track",
+             "genre", "isrc", "comment")
+
+
+def _release_cover(rel) -> tuple[bytes | None, str]:
+    """封面图 → (字节, mime)。★ 只认媒体目录里的 jpg/png,别的一律拒绝。"""
+    if not rel:
+        return None, "image/jpeg"
+    p = (ROOT / str(rel)).resolve()
+    if not _inside(p, (MEDIA,)) or not p.is_file():
+        raise HTTPException(404, "封面图没找到")
+    mime = COVER_EXT.get(p.suffix.lower())
+    if not mime:
+        raise HTTPException(415, "封面只收 jpg / png")
+    if p.stat().st_size > COVER_MAX:
+        raise HTTPException(413, "封面太大(上限 8MB)")
+    return p.read_bytes(), mime
+
+
+def _release_tags(proj: dict, body: dict) -> tuple[dict, bytes | None, str]:
+    """发行标签:工程 `meta.tags` 打底,请求体里的 `tags` 覆盖。
+
+    ★ 只收白名单字段,长度截到 200 —— 标签是要写进 ID3 的,
+      随便塞个几 MB 的字符串进去只会把文件撑坏。
+    """
+    meta = proj.get("meta") if isinstance(proj.get("meta"), dict) else {}
+    tags: dict[str, str] = {}
+    for src in (meta.get("tags"), body.get("tags")):
+        if not isinstance(src, dict):
+            continue
+        for k in _TAG_KEYS:
+            v = src.get(k)
+            if v not in (None, ""):
+                tags[k] = str(v)[:200]
+    cover, mime = _release_cover((meta.get("cover") if isinstance(meta, dict) else None)
+                                 or body.get("cover"))
+    return tags, cover, mime
+
+
+def _release_check(audio: np.ndarray, sr: int, target_lufs) -> dict:
+    rep = studio_release.measure(audio, sr)
+    return {"report": rep,
+            "verdicts": studio_release.verdicts(rep, target_lufs)}
 
 
 @router.post("/export")
@@ -1109,6 +1299,8 @@ async def export_project(request: Request) -> dict:
     else:
         want_stems = raw_stems is True
         stage = "pre"
+    if want_stems and not edition.is_pro():
+        raise HTTPException(403, "「分轨导出」是 Pro 版功能,当前为社区版。")
     if not want_stems and fmt not in ("wav", "mp3"):
         raise HTTPException(415, "只导 wav / mp3")
     pipeline = str(b.get("pipeline") or "builtin").lower()
@@ -1132,9 +1324,25 @@ async def export_project(request: Request) -> dict:
             raise HTTPException(400, "loudness 必须是个数(-14 / -9)或 null")
         if not -40.0 <= loudness <= -5.0:
             raise HTTPException(400, "loudness 只收 -40 ~ -5 LUFS")
+    peak_db = _peak_db_of(b)
     rng = b.get("range") or None
     start = float(rng[0]) if isinstance(rng, list) and len(rng) > 0 else 0.0
     end = float(rng[1]) if isinstance(rng, list) and len(rng) > 1 else None
+
+    # ---- 发行交付规格:采样率 / 位深 / 标签 / 封面 ----
+    try:
+        sr_out = int(b.get("sr") or sm.SR)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "sr 只收整数")
+    if sr_out not in (44100, 48000):
+        raise HTTPException(400, "导出采样率只收 44100 / 48000")
+    try:
+        bits = int(b.get("bits") or 24)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "bits 只收 16 / 24")
+    if bits not in (16, 24):
+        raise HTTPException(400, "位深只收 16 / 24")
+    tags, cover, cover_mime = _release_tags(proj, b)
 
     loop = asyncio.get_running_loop()
     t0 = time.perf_counter()
@@ -1146,11 +1354,12 @@ async def export_project(request: Request) -> dict:
         out = EXPORTS / f"{stem_name}_{stamp}_stems.zip"
         try:
             stems, missing = await loop.run_in_executor(
-                _pool, functools.partial(_stems_with_vst, proj, stage, start, end))
+                _pool, functools.partial(_stems_with_vst, proj, stage, start, end,
+                                         sr_out))
             real_end = float(end) if end is not None else sm.project_end(proj)
             pack = await loop.run_in_executor(
                 _pool, functools.partial(_write_stems_zip, out, stems, proj,
-                                         sm.SR, stage, start, real_end, missing))
+                                         sr_out, stage, start, real_end, missing))
         except (studio_vst.VstError, studio_vst.VstUnavailable) as e:
             raise HTTPException(400, f"VST 失败:{e}")
         except Exception as e:             # noqa: BLE001
@@ -1164,27 +1373,36 @@ async def export_project(request: Request) -> dict:
     # ---- 外部渲染器(现在必然没有,走到这儿说明以后接上了)----
     if renderer is not None:
         stems, missing = await loop.run_in_executor(
-            _pool, functools.partial(sm.render_stems, proj, sm.SR, "pre",
+            _pool, functools.partial(sm.render_stems, proj, sr_out, "pre",
                                      start, end))
         pairs = [(st["name"], st["audio"]) for st in stems]
         try:
             audio = await loop.run_in_executor(
-                _pool, functools.partial(renderer.render, pairs, proj, sm.SR))
+                _pool, functools.partial(renderer.render, pairs, proj, sr_out))
         except Exception as e:             # noqa: BLE001
             raise HTTPException(500, f"外部渲染失败:{e}")
         audio = np.asarray(audio, dtype=np.float32)
         if audio.ndim != 2 or audio.shape[1] != 2:
             raise HTTPException(500, "外部渲染器必须返回 (n, 2) 立体声")
-        rep = {"sec": round(len(audio) / sm.SR, 3),
+        rep = {"sec": round(len(audio) / sr_out, 3),
                "peak": round(float(np.max(np.abs(audio))) if len(audio) else 0.0, 4),
                "missing": missing, "pipeline": "external"}
     else:
         try:
             audio, rep = await loop.run_in_executor(
                 _pool, functools.partial(_mix_with_vst, proj, normalize,
-                                         start, end, loudness))
+                                         start, end, loudness, sr_out,
+                                         _ceiling_for(fmt), peak_db))
         except (studio_vst.VstError, studio_vst.VstUnavailable) as e:
             raise HTTPException(400, f"VST 失败:{e}")
+
+    # ---- 发行规格检查:量完再写文件,不过线也照样给结果(由界面决定要不要拦)----
+    if not want_stems and len(audio):
+        try:
+            rep["check"] = await loop.run_in_executor(
+                _pool, functools.partial(_release_check, audio, sr_out, loudness))
+        except Exception as e:             # noqa: BLE001
+            rep["check"] = {"error": str(e)}
 
     # preview=True:输出到 projects/preview/,给「渲染试听整曲」用(只留最近 20 个)
     want_preview = bool(b.get("preview", False))
@@ -1194,11 +1412,18 @@ async def export_project(request: Request) -> dict:
     out = out_dir / f"{stem_name}_{stamp}.{fmt}"
     try:
         if fmt == "wav":
+            data = studio_release.dither(audio, bits) if bits == 16 else audio
             await loop.run_in_executor(
-                _pool, sm.write_wav_atomic, out, audio, sm.SR, "PCM_24")
+                _pool, sm.write_wav_atomic, out, data, sr_out, f"PCM_{bits}")
+            # ★ 自己发行也要标签:wav 里塞一个 `id3 ` 块,谁读都带着
+            if tags or cover:
+                tag = studio_release.id3v23(tags, cover, cover_mime)
+                await loop.run_in_executor(
+                    _pool, functools.partial(studio_release.add_wav_id3, out, tag))
         else:
             await loop.run_in_executor(
-                _pool, _write_mp3, audio, sm.SR, out, 320)
+                _pool, functools.partial(_write_mp3, audio, sr_out, out, 320,
+                                         tags, cover, cover_mime))
     except Exception as e:                 # noqa: BLE001
         raise HTTPException(500, f"导出失败:{e}")
     if want_preview:
@@ -1215,8 +1440,90 @@ async def export_project(request: Request) -> dict:
     rep.update({"url": url, "file": out.name,
                 "format": fmt, "size": out.stat().st_size,
                 "preview": want_preview,
-                "sec_cost": round(time.perf_counter() - t0, 2)})
+                "sec_cost": round(time.perf_counter() - t0, 2),
+                "sr": sr_out, "bits": bits if fmt == "wav" else None,
+                "tagged": bool(tags) or bool(cover)})
     return rep
+
+
+@router.post("/release_check")
+async def release_check(request: Request) -> dict:
+    """只量不写:这个工程拿去发行是什么样。
+
+    ★ 和 `/export` 走**同一条**混音路径(`_mix_with_vst`),不然量的是另一个东西。
+    ★ 不落任何文件 —— 只是算一遍再量。
+    """
+    b = await request.json()
+    proj = _resolve_project(b)
+    loud = b.get("loudness", -14.0)
+    loudness = None
+    if loud not in (None, False, 0, "", "off"):
+        try:
+            loudness = float(loud)
+        except (TypeError, ValueError):
+            raise HTTPException(400, "loudness 必须是个数(-14 / -9)或 null")
+        if not -40.0 <= loudness <= -5.0:
+            raise HTTPException(400, "loudness 只收 -40 ~ -5 LUFS")
+    try:
+        sr_out = int(b.get("sr") or sm.SR)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "sr 只收整数")
+    if sr_out not in (44100, 48000):
+        raise HTTPException(400, "采样率只收 44100 / 48000")
+    # ★ 按**要交付的格式**量:mp3 的天花板比 wav 更低(见 MP3_CEILING_DB)
+    fmt = str(b.get("format") or "wav").lower()
+    if fmt not in ("wav", "mp3"):
+        raise HTTPException(415, "只认 wav / mp3")
+    peak_db = _peak_db_of(b)
+    loop = asyncio.get_running_loop()
+    t0 = time.perf_counter()
+    try:
+        audio, rep = await loop.run_in_executor(
+            _pool, functools.partial(_mix_with_vst, proj, True, 0.0, None,
+                                     loudness, sr_out, _ceiling_for(fmt),
+                                     peak_db))
+    except (studio_vst.VstError, studio_vst.VstUnavailable) as e:
+        raise HTTPException(400, f"VST 失败:{e}")
+    if not len(audio):
+        raise HTTPException(400, "工程里没有能混的东西")
+    check = await loop.run_in_executor(
+        _pool, functools.partial(_release_check, audio, sr_out, loudness))
+    check["format"] = fmt
+    check["ceiling_db"] = _ceiling_for(fmt)
+    check["peak_db"] = peak_db
+    check["mix"] = {k: rep.get(k) for k in ("sec", "peak_db", "normalized",
+                                            "loudness", "missing")}
+    check["sec_cost"] = round(time.perf_counter() - t0, 2)
+    return check
+
+
+@router.post("/cover")
+async def upload_cover(request: Request, name: str = "") -> dict:
+    """封面图上传。★ 和 /upload 一样不用 multipart,浏览器直接把字节扔过来。"""
+    sm.ensure_dirs()
+    base = Path(name or "cover.jpg").name
+    ext = Path(base).suffix.lower()
+    if ext not in COVER_EXT:
+        raise HTTPException(415, "封面只收 jpg / png")
+    tmp = MEDIA / f"cover_{int(time.time() * 1000)}{ext}.part"
+    total = 0
+    sha = hashlib.sha1()
+    try:
+        with open(tmp, "wb") as f:
+            async for chunk in request.stream():
+                total += len(chunk)
+                if total > COVER_MAX:
+                    raise HTTPException(413, "封面太大(上限 8MB)")
+                f.write(chunk)
+                sha.update(chunk)
+        if total == 0:
+            raise HTTPException(400, "空文件")
+        dst = MEDIA / f"cover_{sha.hexdigest()[:8]}{ext}"
+        tmp.replace(dst)
+    finally:
+        if tmp.exists():
+            tmp.unlink(missing_ok=True)
+    return {"path": _rel(dst), "name": base, "size": dst.stat().st_size}
 
 
 def _referenced_keys() -> set[str]:
@@ -1507,6 +1814,376 @@ async def pool(request: Request) -> dict:
                 "note": midi_name(base_midi),
                 "sec_cost": round(time.perf_counter() - t0, 3)})
     return res
+
+
+# ---------------------------------------------------------------- 鼓机
+# ★ 鼓组不走两条代码:样本按**内容哈希**写进 CACHE/clip_<hex>.wav,
+#   浏览器播它、导出混音也读它 —— 天生「听到的 = 导出的」。
+KITS = ROOT / "kits"
+_KIT_RE = re.compile(r"^[\w-]{1,32}$")
+
+
+@router.get("/kit/list")
+async def kit_list() -> dict:
+    out = []
+    for d in sorted(KITS.glob("*")):
+        meta_p = d / "kit.json"
+        if not meta_p.is_file():
+            continue
+        try:
+            meta = json.loads(meta_p.read_text("utf-8"))
+        except (OSError, ValueError):
+            continue
+        out.append({"id": d.name, "name": str(meta.get("name") or d.name),
+                    "sr": meta.get("sr"), "count": len(meta.get("slots") or [])})
+    return {"kits": out}
+
+
+# 文件名关键词 → GM 音高号。★ 顺序有意义:"open" 必须在 "hat" 前面判,
+# 否则 openhat.wav 会被当成闭镲。
+_KIT_WORDS = [
+    ("openhat", 46), ("open_hat", 46), ("open hat", 46), ("ohat", 46), ("ohh", 46),
+    ("hat", 42), ("hihat", 42), ("hi_hat", 42), ("hh", 42), ("closed", 42), ("chh", 42),
+    ("kick", 36), ("bassdrum", 36), ("bass_drum", 36), ("bd", 36), ("底鼓", 36),
+    ("snare", 38), ("军鼓", 38), ("sd", 38),
+    ("clap", 39), ("拍手", 39),
+    ("crash", 49), ("长镲", 49), ("ride", 51), ("叮叮镲", 51),
+    ("cowbell", 56), ("牛铃", 56),
+    ("tom", 47), ("嗵", 47),
+    ("808", 35), ("sub", 35),
+]
+_KIT_LABEL = {35: "808 低音", 36: "底鼓", 38: "军鼓", 39: "拍手", 42: "闭镲",
+              46: "开镲", 47: "嗵鼓", 49: "长镲", 51: "叮叮镲", 56: "牛铃"}
+
+
+def _guess_slot(stem: str) -> int | None:
+    s = stem.lower().replace("-", " ").replace(".", " ")
+    for w, midi in _KIT_WORDS:
+        if w in s:
+            return midi
+    return None
+
+
+@router.post("/kit/import")
+async def kit_import(request: Request) -> dict:
+    """把一个**本地文件夹**里的 wav 导入成鼓组。
+
+    ★ 只读、只拷进 `kits/<id>/`,不联网。文件夹里的东西不删不改。
+    ★ 版权归你自己负责:能进开源仓库的只有 CC0,商业免费包放本地自己用。
+    """
+    try:
+        b = await request.json()
+    except Exception:                      # noqa: BLE001
+        raise HTTPException(400, "要发 JSON")
+    raw = str(b.get("dir") or "").strip().strip('"')
+    if not raw:
+        raise HTTPException(400, "填一个文件夹路径")
+    d = Path(raw).expanduser()
+    if not d.is_dir():
+        raise HTTPException(400, "这个路径不是文件夹")
+    name = re.sub(r"[^\w\-]", "_", str(b.get("name") or d.name))[:24] or "kit"
+    dst_dir = KITS / name
+    if dst_dir.exists() and not b.get("overwrite"):
+        raise HTTPException(400, f"已经有叫 {name} 的鼓组了,换个名字")
+
+    files = sorted([p for p in d.rglob("*")
+                    if p.is_file() and p.suffix.lower() in (".wav", ".flac", ".aiff", ".aif", ".ogg")])
+    if not files:
+        raise HTTPException(400, "这个文件夹里没有 wav/flac/aiff")
+    if len(files) > 64:
+        raise HTTPException(400, f"文件太多了({len(files)} 个),一个鼓组最多 64 个")
+
+    slots, picked, skipped = [], {}, []
+    for p in files:
+        midi = _guess_slot(p.stem)
+        if midi is None or midi in picked:
+            skipped.append(p.name)
+            continue
+        picked[midi] = p
+        slots.append({"midi": midi, "src": p})
+    if not slots:
+        raise HTTPException(400, "一个鼓件都没认出来(文件名里要有 kick/snare/hat/clap/crash/cowbell 之类)")
+    slots.sort(key=lambda s: s["midi"])
+
+    dst_dir.mkdir(parents=True, exist_ok=True)
+    out = []
+    for s in slots:
+        dst = dst_dir / f"{_KIT_LABEL.get(s['midi'], str(s['midi'])).replace(' ', '_')}{s['src'].suffix.lower()}"
+        tmp = dst.with_name(dst.name + ".part")
+        tmp.write_bytes(s["src"].read_bytes())
+        tmp.replace(dst)
+        try:
+            info = sf.info(str(dst))
+            sec = round(float(info.duration), 3)
+        except Exception:                  # noqa: BLE001
+            sec = None
+        out.append({"midi": s["midi"], "label": _KIT_LABEL.get(s["midi"], str(s["midi"])),
+                    "file": dst.name, "sec": sec})
+    meta = {"id": name, "name": str(b.get("title") or name), "sr": None,
+            "slots": out, "imported": True}
+    (dst_dir / "kit.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1), "utf-8")
+    return {"ok": True, "kit": name, "count": len(out), "skipped": skipped[:12],
+            "dir": _rel(dst_dir)}
+
+
+@router.get("/kit/{kit_id}/pool")
+async def kit_pool(kit_id: str) -> dict:
+    """鼓组样本 → CACHE,返回可直接挂到轨道 sample 字段的结构。
+
+    ★ key 用文件内容哈希:同一个样本永远是同一个 cache 文件,
+      换机器、重装都不会因为时间戳不同而重算。
+    """
+    if not _KIT_RE.match(kit_id or ""):
+        raise HTTPException(404, "没有这个鼓组")
+    d = KITS / kit_id
+    meta_p = d / "kit.json"
+    if not meta_p.is_file():
+        raise HTTPException(404, "没有这个鼓组")
+    meta = json.loads(meta_p.read_text("utf-8"))
+    slots, pool = [], []
+    for s in meta.get("slots") or []:
+        name = Path(str(s.get("file") or "")).name
+        p = d / name
+        if not p.is_file():
+            continue
+        data = p.read_bytes()
+        key = hashlib.sha1(data).hexdigest()[:20]
+        dst = CACHE / f"clip_{key}.wav"
+        if not dst.exists():
+            tmp = dst.with_name(dst.name + ".part")
+            tmp.write_bytes(data)
+            tmp.replace(dst)
+        midi = int(s.get("midi") or 36)
+        slots.append({"midi": midi, "label": str(s.get("label") or name),
+                      "sec": s.get("sec"), "key": key})
+        pool.append({"semis": midi, "key": key,
+                     "url": f"/api/studio/cache/clip_{key}.wav"})
+    if not slots:
+        raise HTTPException(404, "这个鼓组是空的")
+    base = min(s["midi"] for s in slots)
+    for s in slots:
+        s["semis"] = s["midi"] - base
+    for e in pool:
+        e["semis"] = e["semis"] - base
+    return {"kit": kit_id, "name": str(meta.get("name") or kit_id),
+            "baseMidi": base,
+            "poolLo": min(e["semis"] for e in pool),
+            "poolHi": max(e["semis"] for e in pool),
+            "slots": slots, "pool": pool,
+            "attack": 0.002, "release": 0.05}
+
+
+# ---------------------------------------------------------------- AI 生成伴奏
+# ★ 只发文字(风格描述 + 歌词)。**不发音频、不发参考音、不发音色克隆。**
+#   Mureka 的 reference_id / vocal_id 在 studio_gen 里根本没有对应参数。
+# ★ n 写死 1:平台默认 2,按首计费,不传就是双倍扣钱。
+@router.get("/gen/status", dependencies=[_pro("AI 伴奏")])
+async def gen_status() -> dict:
+    return studio_gen.key_state()
+
+
+@router.post("/gen/config", dependencies=[_pro("AI 伴奏")])
+async def gen_config(request: Request) -> dict:
+    b = await request.json()
+    try:
+        return studio_gen.set_config(str(b.get("token") or ""),
+                                     str(b.get("provider") or "mureka"),
+                                     str(b.get("base") or ""))
+    except studio_gen.GenError as e:
+        raise HTTPException(400, str(e)) from None
+
+
+@router.post("/gen/config/clear", dependencies=[_pro("AI 伴奏")])
+async def gen_config_clear(request: Request) -> dict:
+    try:
+        b = await request.json()
+    except Exception:                       # noqa: BLE001  不传 body 也认
+        b = {}
+    return studio_gen.clear_config(str(b.get("provider") or ""))
+
+
+@router.post("/gen/create", dependencies=[_pro("AI 伴奏")])
+async def gen_create(request: Request) -> dict:
+    b = await request.json()
+    try:
+        return await asyncio.get_running_loop().run_in_executor(
+            _pool, functools.partial(
+                studio_gen.create,
+                str(b.get("prompt") or ""),
+                str(b.get("lyrics") or ""),
+                bool(b.get("instrumental", True)),
+                str(b.get("model") or "auto"),
+                bool(b.get("mock", False)),
+                str(b.get("gender") or "female"),
+                str(b.get("provider") or "")))
+    except studio_gen.GenError as e:
+        raise HTTPException(400, str(e)) from None
+
+
+@router.get("/gen/task/{task_id}", dependencies=[_pro("AI 伴奏")])
+async def gen_task(task_id: str) -> dict:
+    try:
+        return await asyncio.get_running_loop().run_in_executor(
+            _pool, studio_gen.query, task_id)
+    except studio_gen.GenError as e:
+        raise HTTPException(400, str(e)) from None
+
+
+@router.post("/gen/fetch", dependencies=[_pro("AI 伴奏")])
+async def gen_fetch(request: Request) -> dict:
+    b = await request.json()
+    try:
+        return await asyncio.get_running_loop().run_in_executor(
+            _pool, functools.partial(studio_gen.fetch,
+                                     str(b.get("taskId") or ""), int(b.get("index") or 0)))
+    except studio_gen.GenError as e:
+        raise HTTPException(400, str(e)) from None
+
+
+# ---------------------------------------------------------------------------
+# 组合模板的试听(30 秒)。同一段风格说明只花一次钱,之后读本机缓存。
+# ---------------------------------------------------------------------------
+@router.post("/gen/preview", dependencies=[_pro("AI 伴奏")])
+async def gen_preview(request: Request) -> dict:
+    b = await request.json()
+    try:
+        return await asyncio.get_running_loop().run_in_executor(
+            _pool, functools.partial(
+                studio_gen.preview_start,
+                str(b.get("prompt") or ""),
+                str(b.get("provider") or "bailian"),
+                str(b.get("model") or "auto")))
+    except studio_gen.GenError as e:
+        raise HTTPException(400, str(e)) from None
+
+
+@router.post("/gen/preview/fetch", dependencies=[_pro("AI 伴奏")])
+async def gen_preview_fetch(request: Request) -> dict:
+    b = await request.json()
+    try:
+        return await asyncio.get_running_loop().run_in_executor(
+            _pool, studio_gen.preview_fetch, str(b.get("taskId") or ""))
+    except studio_gen.GenError as e:
+        raise HTTPException(400, str(e)) from None
+
+
+@router.get("/gen/preview/audio/{key}", dependencies=[_pro("AI 伴奏")])
+async def gen_preview_audio(key: str) -> FileResponse:
+    if not re.fullmatch(r"[0-9a-f]{6,32}", key):
+        raise HTTPException(400, "key 不对")
+    for ext in (".mp3", ".wav"):
+        p = studio_gen.PREVIEW_DIR / f"{key}{ext}"
+        if p.exists():
+            return FileResponse(str(p), media_type=("audio/wav" if ext == ".wav"
+                                                   else "audio/mpeg"))
+    raise HTTPException(404, "这条模板还没试听过")
+
+
+@router.get("/about")
+async def about() -> dict:
+    """「设置 → 关于」要的那点东西。
+
+    ★ 版号 / 开发者 / 邮箱只在 `version.py` 里写一份 —— 网页读这里,
+      别在 JS 里再抄一遍(抄了就会有一边忘了改)。
+    """
+    import platform
+
+    import version as v
+    return {
+        "name": "SingMic",
+        "edition": edition.current(),
+        "editionName": edition.label(),
+        "features": edition.features(),
+        "proFeatures": dict(edition.PRO_FEATURES),
+        "version": v.VERSION,
+        "versionDate": v.VERSION_DATE,
+        "developer": v.DEVELOPER,
+        "copyright": v.COPYRIGHT,
+        "license": v.LICENSE,
+        "licenseUrl": v.LICENSE_URL,
+        "contactEmail": v.CONTACT_EMAIL,
+        "contactGithub": v.CONTACT_GITHUB,
+        "thirdParty": v.THIRD_PARTY,
+        "python": platform.python_version(),
+        "platform": f"{platform.system()} {platform.release()}",
+        "port": int(os.environ.get("SINGMIC_PORT") or 8765),
+        # 「数据与缓存」那一页要告诉人东西存在哪 —— 路径由服务端算,别在 JS 里猜
+        "paths": {
+            "root": str(sm.APP_HOME),
+            "data": str(sm.DATA),
+            "recordings": str(REC),
+            "projects": str(PROJECTS),
+            "exports": str(EXPORTS),
+            "cache": str(CACHE),
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# 偏好设置(存在本机 ~/.singmic/prefs.json,不在浏览器里)
+# ---------------------------------------------------------------------------
+# ★ 为什么要挪出 localStorage:以后要装壳成桌面 App / 换浏览器 / 多个壳共用一份设置,
+#   localStorage 跟着「哪个 webview」走,会各自为政。文件只有一个,谁打开都一样。
+# ★ 只收白名单里的键 + 强制类型 —— 前端送什么都不能把文件撑爆或者塞进奇怪的值。
+CFG_HOME = Path(os.environ.get("SINGMIC_HOME") or (Path.home() / ".singmic"))
+PREFS_PATH = CFG_HOME / "prefs.json"
+PREFS_SCHEMA = {"stage": str, "confirmCost": bool, "autosave": bool, "guide": bool,
+                "lang": str}
+# 字符串型偏好只收枚举内的值(别让一个手滑的字符串把下拉框搞空)
+# ★ lang 的空串是合法值:意思是「跟随系统语言」
+PREFS_ENUMS = {
+    "stage": ("syllable", "note"),
+    "lang": ("", "zh-Hans", "zh-Hant", "en", "ja", "ko"),
+}
+
+
+def _prefs_clean(src) -> dict:
+    out = {}
+    if not isinstance(src, dict):
+        return out
+    for k, t in PREFS_SCHEMA.items():
+        if k not in src:
+            continue
+        v = src[k]
+        if t is bool:
+            if isinstance(v, bool):
+                out[k] = v
+        elif t is str:
+            if isinstance(v, str) and v in PREFS_ENUMS.get(k, ()):
+                out[k] = v
+    return out
+
+
+@router.get("/prefs")
+async def get_prefs() -> dict:
+    got = {}
+    if PREFS_PATH.exists():
+        try:
+            got = _prefs_clean(json.loads(PREFS_PATH.read_text(encoding="utf-8")))
+        except Exception:                  # noqa: BLE001
+            got = {}                       # 文件坏了就当没设置过,不挡人开工
+    return {"prefs": got, "path": str(PREFS_PATH)}
+
+
+@router.post("/prefs")
+async def set_prefs(request: Request) -> dict:
+    try:
+        body = await request.json()
+    except Exception:                      # noqa: BLE001
+        raise HTTPException(400, "不是合法的 JSON")
+    # 合并写:只改送来的键,没送的保持原样(两个壳同时开着也不会互相清空)
+    got = {}
+    if PREFS_PATH.exists():
+        try:
+            got = _prefs_clean(json.loads(PREFS_PATH.read_text(encoding="utf-8")))
+        except Exception:                  # noqa: BLE001
+            got = {}
+    got.update(_prefs_clean(body.get("prefs") if isinstance(body, dict) else body))
+    CFG_HOME.mkdir(parents=True, exist_ok=True)
+    tmp = PREFS_PATH.with_name(PREFS_PATH.name + ".part")
+    tmp.write_text(json.dumps(got, ensure_ascii=False, indent=1), encoding="utf-8")
+    tmp.replace(PREFS_PATH)
+    return {"ok": True, "prefs": got}
 
 
 def tuning_f0(piece: np.ndarray, sr: int) -> float:

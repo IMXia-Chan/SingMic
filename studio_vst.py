@@ -3,7 +3,7 @@
 ★ 这是**唯一**和插件打交道的入口,但它自己 **不 import pedalboard** ——
   pedalboard 只能在独立子进程(`studio_vst_worker.py`)里用。
   这样:插件崩了杀不到服务;而且不装 pedalboard 时主程序照常跑。
-  (本项目是 AGPL-3.0,与 GPL-3.0 相容,所以这里不是许可隔离,是稳定性隔离。)
+  (本项目同为 GPL-3.0,所以这里不是许可隔离,是稳定性隔离。)
 
 ★ 这台机上已经验过的事实(别改回去):
   - pedalboard **不能**加载 `.vst3` 目录,必须指到
@@ -290,7 +290,9 @@ def track_sig(project: dict, track: dict, sr: int = 48000) -> str:
         srcs[sid] = [s.get("path"), s.get("size"), s.get("mtime")]
     fx = track.get("fx") or {}
     payload = {
-        "v": "post-vst-v1",
+        # ★ v2(2026-10-21):冻结从单声道改成 (n, 2) 立体声。
+        #   版本号必须变,否则盘上那些旧的单声道冻结文件还会被当成命中。
+        "v": "post-vst-v2",
         "sr": int(sr),
         "track": tr_view,
         "chain": fx.get("chain") if isinstance(fx, dict) else None,
@@ -321,8 +323,15 @@ class _Worker:
         env.setdefault("PYTHONUNBUFFERED", "1")
         self.q = queue.Queue()
         self.err.clear()
+        # ★ 冻结成 exe 之后 sys.executable 是 SingMic.exe 本身,不是解释器 ——
+        #   再带脚本路径跑一次只会把整个 App 开第二遍。冻结时改成「同一个 exe + 开关」,
+        #   desktop.py 见到 --vst-worker 就只进 worker 的 main,不建窗口、不起服务。
+        if getattr(sys, "frozen", False):
+            cmd = [sys.executable, "--vst-worker"]
+        else:
+            cmd = [sys.executable, "-I", str(WORKER)]
         self.proc = subprocess.Popen(
-            [sys.executable, "-I", str(WORKER)],
+            cmd,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, encoding="utf-8", errors="replace", bufsize=1,
             cwd=str(ROOT), env=env)

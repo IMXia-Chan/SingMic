@@ -470,11 +470,17 @@ def _rel_to_media(p: Path, media_dir: Path) -> str:
         return p.name
 
 
-def status() -> dict:
+def status(probe: bool = True) -> dict:
+    """probe=False 供社区版用:不去连云端,如实说「没有个人音色补音」。"""
     c = cfg_view()
-    h = probe_health() if c["configured"] else {
-        "ok": False, "reachable": False, "detail": "没配置云端", "modelVersion": "",
-        "materialsSec": 0, "trainedAt": "", "engine": "", "device": ""}
+    if not probe:
+        h = {"ok": False, "reachable": False,
+             "detail": "个人音色补音是 Pro 版功能", "modelVersion": "",
+             "materialsSec": 0, "trainedAt": "", "engine": "", "device": ""}
+    else:
+        h = probe_health() if c["configured"] else {
+            "ok": False, "reachable": False, "detail": "没配置云端", "modelVersion": "",
+            "materialsSec": 0, "trainedAt": "", "engine": "", "device": ""}
     return {
         "config": c,
         "cloud": {k: h.get(k) for k in ("ok", "reachable", "detail", "modelVersion",

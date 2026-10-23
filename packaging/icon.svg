@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SingMic Studio 应用图标母版：盘身昂首的蓝色蝰蛇。
+
+     这是唯一的设计源;所有尺寸(PNG/ICO/MSIX 磁贴)都由 render_icon.py 从它渲染出来,
+     不要在别处手改某一张 PNG —— 改图只改这里,再跑:
+         python packaging/render_icon.py
+         python packaging/make_icons.py --preview
+
+     结构分两组:
+       #tile  —— 圆角底 + 一道细描边(方图、exe 图标、开始菜单用)
+       #glyph —— 只有蛇本身(宽磁贴用,底色由磁贴自己给)
+     render_icon.py 靠隐藏 #tile 来渲染「透明底蛇」那一张,别改动这两个 id。 -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#15507f"/><stop offset=".55" stop-color="#0b2a49"/><stop offset="1" stop-color="#061321"/>
+    </linearGradient>
+    <linearGradient id="sk" x1="22" y1="10" x2="46" y2="52" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#c2f0ff"/><stop offset=".38" stop-color="#5cbdf8"/><stop offset="1" stop-color="#1a58a8"/>
+    </linearGradient>
+    <linearGradient id="bd" x1="26" y1="55" x2="46" y2="24" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1a58a8"/><stop offset=".5" stop-color="#4fb2f6"/><stop offset="1" stop-color="#9fe2ff"/>
+    </linearGradient>
+  </defs>
+
+  <g id="tile">
+    <rect x="0" y="0" width="64" height="64" rx="15" fill="url(#bg)"/>
+    <rect x=".75" y=".75" width="62.5" height="62.5" rx="14.25" fill="none"
+          stroke="#2f6fa8" stroke-opacity=".5" stroke-width="1"/>
+  </g>
+
+  <g id="glyph">
+    <!-- 盘身:左半圈从尾尖绕到左上,右半圈从尾尖绕上来接住头 -->
+    <path d="M32 54c-9.6 0-16.4-6-16.4-13.6C15.6 33 21.4 28 29 28"
+          stroke="url(#bd)" stroke-width="6.8" stroke-linecap="round" fill="none"/>
+    <path d="M32 54c9.6 0 16.4-6 16.4-13.6 0-5.6-3.6-9.8-9.4-11.6"
+          stroke="url(#bd)" stroke-width="6.8" stroke-linecap="round" fill="none"/>
+    <!-- 头 -->
+    <path d="M36.6 14.2c2.8 1 4.2 3.4 3.4 6.2-.8 2.8-3.2 4.4-6.4 5.4-3.6-2.4-5.4-4.4-5-7.4.4-2.8 2.8-4.8 8-4.2z"
+          fill="url(#sk)"/>
+    <ellipse cx="32.4" cy="19" rx="1.2" ry="3.4" fill="#071626"/>
+  </g>
+</svg>

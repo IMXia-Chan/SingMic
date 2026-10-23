@@ -1,0 +1,8 @@
+{
+  "identityName": "SingMicDev.SingMicStudio",
+  "publisher": "CN=SingMic-Dev",
+  "publisherDisplayName": "IMXia-Chan",
+  "displayName": "声麦 Studio Pro",
+  "description": "录音、修音、编曲、混音与导出，全部在本机完成的一体化音频工作站。",
+  "_note": "这份只用于本机试打包（验证清单和目录结构）。上架必须用 identity.json，里面的包名和发行商要照 Partner Center 一字不差地抄。"
+}

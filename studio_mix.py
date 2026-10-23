@@ -12,6 +12,8 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -21,9 +23,22 @@ import studio_fx
 import studio_vst
 import tuning
 
-ROOT = Path(__file__).resolve().parent
-REC = ROOT / "recordings"
-PROJECTS = ROOT / "projects"
+# 程序目录：web/、tools/、kits 模板这些**只读资源**在这里；打包后就是 _internal。
+APP = Path(__file__).resolve().parent
+# 界面上「程序」那一行要显示**安装目录**（exe 所在），不是内部的 _internal
+APP_HOME = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else APP
+
+# 数据根：录音、工程、导出、渲染缓存、鼓包。
+# ★ 工程和媒体里存的都是**相对数据根**的路径，所以下面 ROOT 必须指数据根，
+#   不能再指程序目录 —— 这两个概念从这一行开始分开。
+# ★ 没设 SINGMIC_DATA 时 DATA == APP，开发与便携版的行为跟以前一模一样；
+#   安装版由 desktop.py 设到 %LOCALAPPDATA%\SingMic\data（Program Files 只读，写不进去）。
+_env_data = (os.environ.get("SINGMIC_DATA") or "").strip()
+DATA = Path(_env_data).expanduser() if _env_data else APP
+
+ROOT = DATA                      # 兼容旧代码：相对路径的解析基准
+REC = DATA / "recordings"
+PROJECTS = DATA / "projects"
 MEDIA = PROJECTS / "media"
 CACHE = PROJECTS / "cache"
 EXPORTS = PROJECTS / "exports"
@@ -79,6 +94,20 @@ def load_mono(path: Path) -> tuple[np.ndarray, int]:
     if x.ndim == 2:
         x = x.mean(axis=1).astype(np.float32)
     return x, int(sr)
+
+
+def load_stereo(path: Path) -> tuple[np.ndarray, int]:
+    """读成 (n, 2)。单声道文件复制到左右 —— 和浏览器把单声道源接进立体声总线一致。
+
+    ★ 以前整条混音路都是 `load_mono`:导出的歌被并成双单声道(L == R)。
+      本来有立体声宽度的歌,过一遍调音台就窄了,两边电平还各低 3 dB。
+    """
+    x, sr = sf.read(str(path), dtype="float32", always_2d=True)
+    if x.shape[1] == 1:
+        x = np.repeat(x, 2, axis=1)
+    elif x.shape[1] > 2:
+        x = x[:, :2]
+    return np.ascontiguousarray(x, dtype=np.float32), int(sr)
 
 
 def _fade(x: np.ndarray, sr: int, sec: float = FADE_S) -> np.ndarray:
@@ -415,15 +444,20 @@ def _resample(y: np.ndarray, sr_in: int, sr_out: int) -> np.ndarray:
 
 def _apply_env(y: np.ndarray, sr: int, gain: float,
                fade_in: float, fade_out: float) -> np.ndarray:
-    """与浏览器调度器同一套包络:两端线性。"""
+    """与浏览器调度器同一套包络:两端线性。(n,) 和 (n,2) 都吃。"""
     y = np.asarray(y, dtype=np.float32) * float(gain)
     n = len(y)
     k_in = min(int(round(max(0.0, fade_in) * sr)), n)
     k_out = min(int(round(max(0.0, fade_out) * sr)), max(0, n - k_in))
+    ramp_in = np.linspace(0.0, 1.0, k_in, dtype=np.float32)
+    ramp_out = np.linspace(1.0, 0.0, k_out, dtype=np.float32)
+    if y.ndim == 2:                      # 立体声:同一条斜线作用在每一列
+        ramp_in = ramp_in[:, None]
+        ramp_out = ramp_out[:, None]
     if k_in > 0:
-        y[:k_in] *= np.linspace(0.0, 1.0, k_in, dtype=np.float32)
+        y[:k_in] *= ramp_in
     if k_out > 0:
-        y[-k_out:] *= np.linspace(1.0, 0.0, k_out, dtype=np.float32)
+        y[-k_out:] *= ramp_out
     return y
 
 
@@ -435,18 +469,34 @@ def _raw(path: Path, memo: dict) -> tuple[np.ndarray, int]:
 
 
 def _load_src(path: Path, sr_out: int, memo: dict) -> np.ndarray:
-    k = str(path)
+    """源文件 → (n, 2) / 48k。★ 缓存 key 带 `st:` 前缀,别和单声道那份撞。"""
+    k = "st:" + str(path)
     if k in memo:
         return memo[k]
-    y, sr = load_mono(path)
+    y, sr = load_stereo(path)
     y = _resample(y, sr, sr_out)
     memo[k] = y
     return y
 
 
+def _src_channels(path: Path, memo: dict) -> int:
+    """源文件原本有几条声道 —— 决定这一轨用哪种声像律。"""
+    k = "ch:" + str(path)
+    if k not in memo:
+        try:
+            memo[k] = int(sf.info(str(path)).channels)
+        except Exception:                 # noqa: BLE001
+            memo[k] = 1
+    return memo[k]
+
+
 def _clip_piece(project: dict, clip: dict, sr_out: int, memo: dict,
                 log: list) -> np.ndarray | None:
-    """一个 clip 该发出来的单声道波形(已经变调/变速过)。"""
+    """一个 clip 该发出来的波形 (n, 2)(已经变调/变速过)。
+
+    ★ 变过调的块仍是**单声道**渲染(PSOLA 是单声道算法),再复制到左右两边。
+      这是明说的限制:变调会把立体声宽度收成居中,不变调的块宽度原样保留。
+    """
     src = (project.get("sources") or {}).get(clip.get("sourceId"))
     semis = float(clip.get("semis") or 0)
     cents = float(clip.get("cents") or 0)
@@ -481,7 +531,7 @@ def _clip_piece(project: dict, clip: dict, sr_out: int, memo: dict,
                 y = _resample(y, sr_file, sr_out)
             if len(y) != out_n:
                 y = y[:out_n] if len(y) > out_n else np.pad(y, (0, out_n - len(y)))
-            return y.astype(np.float32, copy=False)
+            return np.repeat(y.astype(np.float32, copy=False)[:, None], 2, axis=1)
         except Exception as e:            # noqa: BLE001
             log.append(f"{clip.get('id')}: {e}")
             return None
@@ -497,7 +547,7 @@ def _clip_piece(project: dict, clip: dict, sr_out: int, memo: dict,
     b = int(round(float(clip.get("srcOut") or 0) * sr_out))
     y = x[max(0, a):min(len(x), max(a, b))]
     if len(y) < out_n:
-        y = np.pad(y, (0, out_n - len(y)))
+        y = np.pad(y, ((0, out_n - len(y)), (0, 0)))
     elif len(y) > out_n:
         y = y[:out_n]
     return y
@@ -529,7 +579,8 @@ def _note_piece(tr: dict, nt: dict, sr_out: int, memo: dict) -> np.ndarray | Non
     ko = min(n, int(round(rel * sr_out)))
     if ko > 0:
         env[n - ko:] = np.linspace(vel, 0.0, ko, dtype=np.float32)
-    return y.astype(np.float32) * env
+    # 采样器的音色池是单声道 ⇒ 左右各放一份
+    return np.repeat((y.astype(np.float32) * env)[:, None], 2, axis=1)
 
 
 # ---------------------------------------------------------------------------
@@ -573,6 +624,19 @@ def _delay_wet(x: np.ndarray, sr: int, t: float, fb: float, mix: float) -> np.nd
     for k in range(1, m):
         Y[k] = B[k - 1] + fb * Y[k - 1]
     return (Y.reshape(-1)[:n] * mix).astype(np.float32)
+
+
+def _per_ch(fn, x: np.ndarray, *a, **kw) -> np.ndarray:
+    """把只认单声道的处理(插入链 / VST / 混响延迟)逐声道跑一遍。
+
+    ★ 压缩、限幅这类**非线性**处理按声道各算各的 —— 左右两边的增益会略有差别,
+      这正是大多数 DAW 不勾「立体声联动」时的行为。要联动得另写,别在这儿糊。
+    """
+    x = np.asarray(x, dtype=np.float32)
+    if x.ndim == 1:
+        return fn(x, *a, **kw)
+    cols = [np.asarray(fn(x[:, c], *a, **kw), dtype=np.float32) for c in range(x.shape[1])]
+    return np.stack(cols, axis=1)
 
 
 def _apply_fx(x: np.ndarray, sr: int, fx: dict) -> np.ndarray:
@@ -656,14 +720,34 @@ def limit_peaks(y: np.ndarray, sr: int = SR, ceiling_db: float = -0.3,
     return out.astype(np.float32)
 
 
-def master_to(y: np.ndarray, sr: int = SR, target: float = -14.0
-              ) -> tuple[np.ndarray, dict]:
+def master_to(y: np.ndarray, sr: int = SR, target: float = -14.0,
+              ceiling_db: float = -1.0) -> tuple[np.ndarray, dict]:
+    """母带:按 LUFS 定响度,再按**真峰**限幅。
+
+    ★ 以前天花板是 -0.3 dBFS 的**采样峰** —— 流媒体转 AAC/Opus 会重建波形,
+      采样之间的峰能再冒出来零点几 dB,到平台上就削顶。发行线是 -1 dBTP。
+    """
+    from studio_release import limit_true_peak, true_peak_db
+
     before = integrated_lufs(y, sr)
     gain = 10 ** ((float(target) - before) / 20.0)
-    y2 = limit_peaks(np.asarray(y, dtype=np.float64) * gain, sr)
+    src = np.asarray(y, dtype=np.float64)
+    y2 = limit_true_peak(src * gain, sr, ceiling_db)
+    # ★ 限幅会吃掉一点响度(峰值材料吃得多)。再补一次增益重限一遍,
+    #   让成品落在目标上;补两次还到不了就照实报,不硬凑。
+    after = integrated_lufs(y2, sr)
+    for _ in range(2):
+        miss = float(target) - after
+        if abs(miss) <= 0.3:
+            break
+        gain *= 10 ** (miss / 20.0)
+        y2 = limit_true_peak(src * gain, sr, ceiling_db)
+        after = integrated_lufs(y2, sr)
     return y2, {"lufs_before": round(before, 2),
                 "gain_db": round(20.0 * math.log10(max(gain, 1e-9)), 2),
-                "lufs_after": round(integrated_lufs(y2, sr), 2)}
+                "lufs_after": round(after, 2),
+                "true_peak_db": round(float(true_peak_db(y2, sr)), 2),
+                "ceiling_db": round(float(ceiling_db), 2)}
 
 
 def _apply_vst(vst, tbuf: np.ndarray, sr: int, fx, label: str) -> np.ndarray:
@@ -704,7 +788,9 @@ def _check_vst(vst, fx, label: str) -> None:
 
 def mix_project(project: dict, sr_out: int = SR, normalize: bool = False,
                 start: float = 0.0, end: float | None = None,
-                loudness: float | None = None, vst=None) -> tuple[np.ndarray, dict]:
+                loudness: float | None = None, vst=None,
+                ceiling: float = -1.0,
+                normalize_db: float | None = None) -> tuple[np.ndarray, dict]:
     """把工程混成一条立体声。
 
     ★ 用的是**和播放同一批缓存片段、同一套包络公式**,所以导出的和听到的是同一个东西。
@@ -737,19 +823,23 @@ def mix_project(project: dict, sr_out: int = SR, normalize: bool = False,
             continue
         g = float(tr.get("gain", 1) or 0)
         pan = max(-1.0, min(1.0, float(tr.get("pan", 0) or 0)))
-        # 等功率声像(与 StereoPannerNode 的曲线同量级)
-        th = (pan + 1.0) * math.pi / 4.0
-        gl, gr = math.cos(th), math.sin(th)
 
         # ★ 先攒进本轨的临时缓冲,等整轨 FX 走完再乘轨道增益、再分左右 ——
         #   这个顺序和 engine.js 的 g → FX → pan 逐节点对应。
         tbuf = None
         n_here = 0
+        # 这一轨是不是「真立体声」—— 决定后面用平衡律还是等功率声像律。
+        # ★ 浏览器用的是 StereoPannerNode:StereoPannerNode 对立体声输入和单声道输入
+        #   用的是**两套不同的公式**。导出必须照抄,否则「听到的 ≠ 导出的」。
+        stereo_track = False
 
         for c in tr.get("clips") or []:
             y = _clip_piece(project, c, sr_out, memo, missing)
             if y is None:
                 continue
+            src = (project.get("sources") or {}).get(c.get("sourceId")) or {}
+            if src.get("path") and _src_channels((ROOT / src["path"]).resolve(), memo) > 1:
+                stereo_track = True
             y = _apply_env(y, sr_out, float(c.get("gain", 1) or 0),
                            float(c.get("fadeIn", 0) or 0),
                            float(c.get("fadeOut", 0) or 0))
@@ -759,7 +849,7 @@ def mix_project(project: dict, sr_out: int = SR, normalize: bool = False,
             if b <= a:
                 continue
             if tbuf is None:
-                tbuf = np.zeros(n, dtype=np.float32)
+                tbuf = np.zeros((n, 2), dtype=np.float32)
             tbuf[a:b] += y[a - i0: b - i0]
             n_here += 1
 
@@ -773,7 +863,7 @@ def mix_project(project: dict, sr_out: int = SR, normalize: bool = False,
             if b <= a:
                 continue
             if tbuf is None:
-                tbuf = np.zeros(n, dtype=np.float32)
+                tbuf = np.zeros((n, 2), dtype=np.float32)
             tbuf[a:b] += y[a - i0: b - i0]
             n_here += 1
 
@@ -787,26 +877,51 @@ def mix_project(project: dict, sr_out: int = SR, normalize: bool = False,
         tbuf *= g
         fx = tr.get("fx") or {}
         if isinstance(fx, dict) and fx.get("chain"):
-            tbuf = studio_fx.apply_chain(tbuf, sr_out, fx["chain"])
-        tbuf = _apply_vst(vst, tbuf, sr_out, fx,
-                          str(tr.get("name") or tr.get("id") or "轨道"))
+            tbuf = _per_ch(studio_fx.apply_chain, tbuf, sr_out, fx["chain"])
+        _label = str(tr.get("name") or tr.get("id") or "轨道")
+        tbuf = _per_ch(lambda col: _apply_vst(vst, col, sr_out, fx, _label), tbuf)
         if fx:
-            tbuf = _apply_fx(tbuf, sr_out, fx)
-        out[:, 0] += tbuf * gl
-        out[:, 1] += tbuf * gr
+            tbuf = _per_ch(_apply_fx, tbuf, sr_out, fx)
+
+        # ---- 声像:照抄 Web Audio 的 StereoPannerNode(engine.js 用的就是它)----
+        if stereo_track:
+            # 立体声输入:居中 = 原样;推到一边 = 把另一边并过来、把本边压掉
+            x = pan + 1.0 if pan <= 0 else pan
+            cth, sth = math.cos(x * math.pi / 2.0), math.sin(x * math.pi / 2.0)
+            L, R = tbuf[:, 0], tbuf[:, 1]
+            if pan <= 0:
+                out[:, 0] += L + R * cth
+                out[:, 1] += R * sth
+            else:
+                out[:, 0] += L * cth
+                out[:, 1] += R + L * sth
+        else:
+            # 单声道输入:等功率(居中时两边各 0.707,总功率不变)
+            th = (pan + 1.0) * math.pi / 4.0
+            out[:, 0] += tbuf[:, 0] * math.cos(th)
+            out[:, 1] += tbuf[:, 1] * math.sin(th)
         placed += n_here
 
     peak = float(np.max(np.abs(out))) if out.size else 0.0
     normalized = False
     loud_rep = None
     if normalize and peak > 1e-9:
-        target = 10 ** (-1.0 / 20.0)          # -1 dBFS,留一点头
-        if peak > target:
-            out *= target / peak
+        from studio_release import true_peak_db as _tpd
+        # ★ 按「采样峰和真峰里更紧的那个」缩 —— 只卡采样峰会留下 dBTP 超标。
+        tgt_db = float(ceiling)                  # 发行线(-1 dBTP;mp3 更紧)
+        exact = False
+        if normalize_db is not None and not loudness:
+            # 交出去的「母带前混音」:不压响度,峰**对齐**到指定余量(比如 -6 dBFS)
+            tgt_db = float(normalize_db)
+            exact = True                         # ★ 余量是双向的:小了也要抬上来
+        target = 10 ** (tgt_db / 20.0)
+        cur = max(peak, 10 ** (_tpd(out, sr_out) / 20.0))
+        if exact or cur > target:
+            out *= target / max(cur, 1e-12)
             normalized = True
     if loudness:
         # ★ 母带在归一化之后:先定响度,再用前瞻限幅兜峰值
-        out, loud_rep = master_to(out, sr_out, float(loudness))
+        out, loud_rep = master_to(out, sr_out, float(loudness), float(ceiling))
         normalized = True
     np.clip(out, -1.0, 1.0, out=out)
     peak = float(np.max(np.abs(out))) if out.size else 0.0
@@ -823,12 +938,13 @@ def mix_project(project: dict, sr_out: int = SR, normalize: bool = False,
 def render_stems(project: dict, sr_out: int = SR, stage: str = "pre",
                  start: float = 0.0, end: float | None = None, vst=None
                  ) -> tuple[list[dict], list[str]]:
-    """分轨导出:每轨一条**单声道**波形(给以后的 VST 宿主 / 别的 DAW 用)。
+    """分轨导出:每轨一条波形 (n, 2)(给 VST 宿主 / 别的 DAW 用)。
 
     ★ `stage="pre"`  = 插入链之前(含轨道增益、淡入淡出,**不含**声像与旧混响/延迟)
       `stage="post"` = 插入链之后
     ★ 处理顺序、包络公式、采样对齐和 `mix_project` 完全同一套 —— 所以
       「pre 的各轨按增益/声像相加」必须等于「关掉链和 FX 的主混音」,这是可对账的。
+    ★ 立体声源的宽度原样保留;单声道轨左右两份相同。
     """
     ensure_dirs()
     stage = "post" if str(stage).lower() == "post" else "pre"
@@ -850,7 +966,7 @@ def render_stems(project: dict, sr_out: int = SR, stage: str = "pre",
         if tr.get("mute") or (any_solo and not tr.get("solo")):
             continue
         g = float(tr.get("gain", 1) or 0)
-        tbuf = np.zeros(n, dtype=np.float32)
+        tbuf = np.zeros((n, 2), dtype=np.float32)
         has = False
         for c in tr.get("clips") or []:
             y = _clip_piece(project, c, sr_out, memo, missing)
@@ -883,10 +999,10 @@ def render_stems(project: dict, sr_out: int = SR, stage: str = "pre",
         fx = tr.get("fx") or {}
         chain = fx.get("chain") if isinstance(fx, dict) else None
         if stage == "post" and chain:
-            tbuf = studio_fx.apply_chain(tbuf, sr_out, chain)
+            tbuf = _per_ch(studio_fx.apply_chain, tbuf, sr_out, chain)
         if stage == "post":
-            tbuf = _apply_vst(vst, tbuf, sr_out, fx,
-                              str(tr.get("name") or tr.get("id") or "轨道"))
+            _label = str(tr.get("name") or tr.get("id") or "轨道")
+            tbuf = _per_ch(lambda col: _apply_vst(vst, col, sr_out, fx, _label), tbuf)
         tbuf = np.nan_to_num(tbuf, nan=0.0, posinf=4.0, neginf=-4.0)
         out.append({
             "id": str(tr.get("id") or f"tr_{idx + 1}"),
@@ -899,10 +1015,11 @@ def render_stems(project: dict, sr_out: int = SR, stage: str = "pre",
 def render_track_post(project: dict, track: dict, sr_out: int = SR,
                       start: float = 0.0, end: float | None = None,
                       vst=None) -> np.ndarray:
-    """渲染**一条轨**的「增益 → 内置链 → VST」结果(单声道)。
+    """渲染**一条轨**的「增益 → 内置链 → VST」结果 (n, 2)。
 
     ★ 冻结轨用:忽略 mute/solo(它只是一条音频),不含声像,也不含旧混响/延迟
       —— 和 `mix_project` 里这一轨进入声像之前的那一步逐点一致。
+    ★ 冻结的是立体声:源宽就宽,不会因为冻结被并窄。
     """
     ensure_dirs()
     if end is None:
@@ -914,10 +1031,10 @@ def render_track_post(project: dict, track: dict, sr_out: int = SR,
     if n <= 0:
         # ★ 空工程/空轨也要查插件(见 _check_vst)
         _check_vst(vst, track.get("fx"), label)
-        return np.zeros(0, dtype=np.float32)
+        return np.zeros((0, 2), dtype=np.float32)
     memo: dict = {}
     missing: list[str] = []
-    tbuf = np.zeros(n, dtype=np.float32)
+    tbuf = np.zeros((n, 2), dtype=np.float32)
     has = False
     for c in track.get("clips") or []:
         y = _clip_piece(project, c, sr_out, memo, missing)
@@ -952,9 +1069,8 @@ def render_track_post(project: dict, track: dict, sr_out: int = SR,
     tbuf *= float(track.get("gain", 1) or 0)
     fx = track.get("fx") or {}
     if isinstance(fx, dict) and fx.get("chain"):
-        tbuf = studio_fx.apply_chain(tbuf, sr_out, fx["chain"])
-    tbuf = _apply_vst(vst, tbuf, sr_out, fx,
-                      str(track.get("name") or track.get("id") or "轨道"))
+        tbuf = _per_ch(studio_fx.apply_chain, tbuf, sr_out, fx["chain"])
+    tbuf = _per_ch(lambda col: _apply_vst(vst, col, sr_out, fx, label), tbuf)
     return np.nan_to_num(tbuf, nan=0.0, posinf=4.0, neginf=-4.0).astype(np.float32)
 
 

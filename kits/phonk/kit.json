@@ -1,0 +1,50 @@
+{
+  "id": "phonk",
+  "name": "808 / Phonk",
+  "note": "全部由 tools/make_kit.py 合成,无第三方采样,可自由分发",
+  "sr": 48000,
+  "slots": [
+    {
+      "midi": 36,
+      "file": "kick.wav",
+      "label": "底鼓",
+      "sec": 0.4199
+    },
+    {
+      "midi": 38,
+      "file": "snare.wav",
+      "label": "军鼓",
+      "sec": 0.34
+    },
+    {
+      "midi": 39,
+      "file": "clap.wav",
+      "label": "拍手",
+      "sec": 0.3799
+    },
+    {
+      "midi": 42,
+      "file": "hatc.wav",
+      "label": "闭镲",
+      "sec": 0.0893
+    },
+    {
+      "midi": 46,
+      "file": "hato.wav",
+      "label": "开镲",
+      "sec": 0.4196
+    },
+    {
+      "midi": 49,
+      "file": "crash.wav",
+      "label": "长镲",
+      "sec": 1.5999
+    },
+    {
+      "midi": 56,
+      "file": "cowbell.wav",
+      "label": "牛铃",
+      "sec": 0.3997
+    }
+  ]
+}

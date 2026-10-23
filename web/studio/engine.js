@@ -541,14 +541,18 @@ export class Engine {
     }
   }
 
-  // 采样轨的一个音符:按 (midi - baseMidi) 找池里那一条
-  _noteBuffer(tr, nt) {
+  // 采样轨/鼓轨的一个音符:按 (midi - baseMidi) 找池里那一条
+  _poolEntry(tr, nt) {
     const smp = tr.sample;
     if (!smp || !smp.pool) return null;
     const semi = Math.round((+nt.midi || 60) - (+smp.baseMidi || 60));
     const lo = smp.poolLo ?? -7, hi = smp.poolHi ?? 7;
     if (semi < lo || semi > hi) return null;
-    const e = smp.pool.find(x => x.semis === semi);
+    return smp.pool.find(x => x.semis === semi) || null;
+  }
+
+  _noteBuffer(tr, nt) {
+    const e = this._poolEntry(tr, nt);
     if (!e) return null;
     const b = this.rendered.get(e.key);
     if (!b) this.renderedBuffer(e.key, e.url).catch(() => {});
@@ -696,8 +700,15 @@ export class Engine {
   // 卷帘上点一下的即听
   async previewNote(tr, note) {
     await this.resume();
-    const buf = this._noteBuffer(tr, note);
-    if (!buf) return false;
+    let buf = this._noteBuffer(tr, note);
+    // ★ 第一次点某个音时样本还没解码 —— 以前直接返回 false,表现为「第一下没声,第二下才有」。
+    //   这里等它下来再发声,鼓机上一个格子一下试听才不会漏。
+    if (!buf) {
+      const e = this._poolEntry(tr, note);
+      if (!e) return false;
+      try { buf = await this.renderedBuffer(e.key, e.url); }
+      catch (err) { return false; }
+    }
     const g = this.ctx.createGain();
     g.gain.value = Math.max(0.01, Math.min(1.2, note.vel ?? 0.9));
     g.connect(this.master);
