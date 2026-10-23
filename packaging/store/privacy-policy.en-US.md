@@ -56,4 +56,5 @@ Changes to this policy will be published with a software update, and the effecti
 ## 9. Contact
 
 - Project home: https://github.com/IMXia-Chan
-- Microsoft Store listing: leave a review or a message on the store page for SingMic Studio
+- Support email: singmic.studio@foxmail.com
+- Microsoft Store listing: leave a review or a message on the store page for 声麦 Studio Pro

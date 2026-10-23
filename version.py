@@ -14,7 +14,7 @@ COPYRIGHT = "2026"
 LICENSE = "GPL-3.0"
 LICENSE_URL = "https://www.gnu.org/licenses/gpl-3.0.html"
 
-CONTACT_EMAIL = ""   # 显示在「设置 → 联系与反馈」;留空则只显示 GitHub
+CONTACT_EMAIL = "singmic.studio@foxmail.com"   # 显示在「设置 → 联系与反馈」;专用邮箱,非个人主邮箱
 CONTACT_GITHUB = "https://github.com/IMXia-Chan"
 
 # 第三方组件(NOTICE 里的那份是人看的,这里是网页上那几行)

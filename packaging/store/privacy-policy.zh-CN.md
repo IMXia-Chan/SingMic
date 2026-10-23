@@ -58,4 +58,5 @@ AI 伴奏生成与调音助手会把内容交给第三方服务平台处理，�
 如有隐私相关问题，请通过以下方式联系：
 
 - 项目主页：https://github.com/IMXia-Chan
+- 支持邮箱：singmic.studio@foxmail.com
 - Microsoft Store 应用页面：可在《声麦 Studio Pro》的商店页面留言或评价
