@@ -370,24 +370,9 @@ async def run() -> int:
             await shot(c, "04_混音台.png")
             await c.ev("document.getElementById('bottom').style.flexBasis=''")
 
-            # 5 AI 伴奏面板：空表单拍出来像没用过，填一份**自拟歌词**的示例
-            #   （示例是原创的四句，不引用任何已发表歌词；API Key 留空，不造假凭据）。
-            await c.ev("document.querySelector('.tabs button[data-tab=\"roll\"]').click()")
-            await c.ev("document.getElementById('genPanel').hidden=false")
-            await c.ev(
-                "(()=>{const g=(i)=>document.getElementById(i);"
-                "const v=g('genVocal');v.checked=true;"
-                "v.dispatchEvent(new Event('change',{bubbles:true}));"
-                "const pr=g('genPrompt');"
-                "pr.value='流行抒情，72 bpm，钢琴与弦乐铺底，主歌贴脸、副歌加一层和声，4/4 直拍';"
-                "pr.dispatchEvent(new Event('input',{bubbles:true}));"
-                "const ly=g('genLyrics');"
-                "ly.value='[Verse]\\n夜色落在窗台\\n风把旧信翻开\\n"
-                "[Chorus]\\n我还在等一个答案\\n等到灯火都变淡';"
-                "ly.dispatchEvent(new Event('input',{bubbles:true}));})()")
-            await asyncio.sleep(0.6)
-            await shot(c, "05_AI伴奏.png")
-            await c.ev("document.getElementById('genPanel').hidden=true")
+            # 5 不再拍 AI 伴奏面板：该面板会显示第三方平台名称与按首计价，
+            #   放进公开仓库容易被误读成合作关系或收费项。商店只要 1 张以上，
+            #   现有 5 张足够。（2026-10-23 删除）
 
             # 6 设置 → 界面语言
             await c.ev("document.getElementById('settings').hidden=false")
@@ -395,7 +380,7 @@ async def run() -> int:
             await c.ev("(()=>{const e=document.querySelector('#setNav [data-sec=\\'prefs\\']');"
                        "if(e)e.click();})()")
             await asyncio.sleep(0.8)
-            await shot(c, "06_设置语言.png")
+            await shot(c, "05_设置语言.png")
             await c.ev("document.getElementById('settings').hidden=true")
 
             print(f"完成，共 {len(list(OUT.glob('*.png')))} 张 → {OUT}")
