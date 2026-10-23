@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SingMic Studio Pro Privacy Policy</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { margin: 0; font: 16px/1.75 -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+         color: #1a1a1a; background: #fff; }
+  main { max-width: 780px; margin: 0 auto; padding: 48px 24px 80px; }
+  h1 { font-size: 28px; margin: 0 0 10px; }
+  h2 { font-size: 19px; margin: 36px 0 12px; padding-top: 10px; border-top: 1px solid #e8e8e8; }
+  .meta { color: #666; font-size: 14px; margin: 0 0 28px; }
+  .meta span { display: block; }
+  ul { padding-left: 22px; }
+  li { margin: 6px 0; }
+  code { background: #f4f4f5; padding: 1px 5px; border-radius: 4px; font-size: 14px; }
+  table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 14px; }
+  th, td { border: 1px solid #e2e2e2; padding: 8px 10px; text-align: left; vertical-align: top; }
+  th { background: #fafafa; font-weight: 600; }
+  .lang { text-align: right; font-size: 14px; margin: 0; }
+  a { color: #0b63ce; }
+  @media (prefers-color-scheme: dark) {
+    body { background: #111; color: #e6e6e6; }
+    code { background: #222; } th { background: #191919; }
+    th, td, h2 { border-color: #2a2a2a; } a { color: #6cb0ff; } .meta { color: #999; }
+  }
+</style>
+</head>
+<body>
+<main>
+<p class="lang"><a href="index.html">中文</a></p>
+
+<h1>SingMic Studio Pro Privacy Policy</h1>
+<p class="meta">
+  <span>Effective date: 2026-10-22</span>
+  <span>Applies to: SingMic Studio Pro 1.0 and later</span>
+  <span>Developer and publisher: IMXia-Chan</span>
+</p>
+<p>SingMic Studio Pro is listed on the Microsoft Store as <strong>声麦 Studio Pro</strong>.</p>
+
+<h2>1. Summary</h2>
+<p>SingMic Studio Pro is a recording and mixing application that runs entirely on the user's own computer. It has <strong>no user accounts, no usage analytics, and no telemetry</strong>. This policy describes what data the application touches, where it is stored, and when it may leave the device.</p>
+
+<h2>2. Data that stays on the device</h2>
+<p>The following is stored locally only, and is never uploaded, synced, or backed up to any server:</p>
+<ul>
+  <li>Recordings, imported audio, generated backing tracks, and exported files;</li>
+  <li>Project files, media library index, and render cache;</li>
+  <li>Interface language, shortcuts, and preferences;</li>
+  <li>Any API key entered by the user (stored under <code>%USERPROFILE%\.singmic\</code> and readable only by local processes).</li>
+</ul>
+<p>The installed application stores data in <code>%LOCALAPPDATA%\SingMic\data</code>. Uninstalling does not automatically remove this folder; the user may delete it.</p>
+
+<h2>3. Microphone</h2>
+<p>The application accesses the microphone when the user starts recording or enables pitch and tempo analysis. Audio is written to local files only and is not transmitted. Microphone access is always initiated by an explicit user action; the application does not record in the background.</p>
+
+<h2>4. Network features</h2>
+<p>The application works without a network connection. The features below are <strong>initiated by the user</strong> and use only services and keys that the user configures:</p>
+<table>
+  <thead><tr><th>Feature</th><th>Data sent</th><th>Recipient</th></tr></thead>
+  <tbody>
+    <tr><td>AI accompaniment generation</td><td>The style description, lyrics, duration, and key entered by the user</td><td>The AI music platform the user selected and configured with their own API key</td></tr>
+    <tr><td>Mixing assistant (natural-language parameter control)</td><td>The user's instruction, plus <strong>track and clip parameters</strong> from the project (gain, pan, plug-in settings, pitch offsets)</td><td>The DeepSeek endpoint configured by the user</td></tr>
+    <tr><td>Voice extension</td><td><strong>The audio segment the user selected</strong> (15 seconds or less)</td><td>The inference server the user set up (runs locally when none is configured)</td></tr>
+  </tbody>
+</table>
+<p>Explicitly not sent: full songs, audio from other tracks, file paths, file names, project names, or any device identifier. If a service is not configured, its feature is unavailable and the application does not connect to any server on its own.</p>
+<p>AI accompaniment generation and the mixing assistant forward content to third-party platforms, whose own privacy policies apply to that processing.</p>
+
+<h2>5. Models</h2>
+<p>Speech recognition and AI noise reduction use local models. Model files are downloaded from public sources after user confirmation, and the download carries no user data.</p>
+
+<h2>6. Children</h2>
+<p>The application does not knowingly collect any information from children and has no account system.</p>
+
+<h2>7. Deleting data</h2>
+<p>Deleting project files, media files, or the entire data folder removes the corresponding data. The application keeps no copy of user data on any server.</p>
+
+<h2>8. Changes</h2>
+<p>Changes to this policy will be published with a software update, and the effective date on this page will be revised.</p>
+
+<h2>9. Contact</h2>
+<ul>
+  <li>Project home: <a href="https://github.com/IMXia-Chan">https://github.com/IMXia-Chan</a></li>
+  <li>Microsoft Store listing: leave a review or a message on the store page for 声麦 Studio Pro</li>
+</ul>
+
+</main>
+</body>
+</html>

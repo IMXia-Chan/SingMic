@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>声麦 Studio Pro 隐私政策</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { margin: 0; font: 16px/1.75 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+         color: #1a1a1a; background: #fff; }
+  main { max-width: 780px; margin: 0 auto; padding: 48px 24px 80px; }
+  h1 { font-size: 28px; margin: 0 0 10px; }
+  h2 { font-size: 19px; margin: 36px 0 12px; padding-top: 10px; border-top: 1px solid #e8e8e8; }
+  .meta { color: #666; font-size: 14px; margin: 0 0 28px; }
+  .meta span { display: block; }
+  ul { padding-left: 22px; }
+  li { margin: 6px 0; }
+  code { background: #f4f4f5; padding: 1px 5px; border-radius: 4px; font-size: 14px; }
+  table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 14px; }
+  th, td { border: 1px solid #e2e2e2; padding: 8px 10px; text-align: left; vertical-align: top; }
+  th { background: #fafafa; font-weight: 600; }
+  .lang { text-align: right; font-size: 14px; margin: 0; }
+  a { color: #0b63ce; }
+  @media (prefers-color-scheme: dark) {
+    body { background: #111; color: #e6e6e6; }
+    code { background: #222; } th { background: #191919; }
+    th, td, h2 { border-color: #2a2a2a; } a { color: #6cb0ff; } .meta { color: #999; }
+  }
+</style>
+</head>
+<body>
+<main>
+<p class="lang"><a href="en.html">English</a></p>
+
+<h1>声麦 Studio Pro 隐私政策</h1>
+<p class="meta">
+  <span>生效日期：2026-10-22</span>
+  <span>适用版本：声麦 Studio Pro 1.0 及以后</span>
+  <span>开发与发布：IMXia-Chan</span>
+</p>
+
+<h2>一、总则</h2>
+<p>声麦 Studio Pro（以下简称“本软件”）是一款在用户自己的电脑上运行的录音与混音软件。本软件<strong>不设立用户账号，不收集使用统计，不内置任何遥测或分析服务</strong>。本政策说明：本软件会接触哪些数据、这些数据存放在哪里、以及在什么情况下会离开本机。</p>
+
+<h2>二、始终保存在本机的内容</h2>
+<p>以下内容全部存放在本机，不上传、不同步、不备份到任何服务器：</p>
+<ul>
+  <li>录音、导入的音频、生成的伴奏与导出成品；</li>
+  <li>工程文件、媒体库索引、渲染缓存；</li>
+  <li>界面语言、快捷键与偏好设置；</li>
+  <li>用户自行填写的 API Key（存于本机 <code>%USERPROFILE%\.singmic\</code> 目录，仅本机进程可读）。</li>
+</ul>
+<p>安装版的数据目录为 <code>%LOCALAPPDATA%\SingMic\data</code>；卸载本软件不会自动删除该目录，用户可自行删除。</p>
+
+<h2>三、麦克风</h2>
+<p>本软件在用户点击录音、或启用音高检测与节拍分析时访问麦克风。音频数据只写入本机文件，不发送到网络。麦克风的使用完全由用户的操作触发，软件不会在后台持续录音。</p>
+
+<h2>四、联网功能与数据流向</h2>
+<p>本软件默认不需要联网。以下功能由用户<strong>主动触发</strong>，并且只使用用户自己配置的服务与密钥：</p>
+<table>
+  <thead><tr><th>功能</th><th>发送的内容</th><th>接收方</th></tr></thead>
+  <tbody>
+    <tr><td>AI 伴奏生成</td><td>用户输入的风格描述、歌词、时长与调式</td><td>用户在设置中选择并配置 API Key 的服务平台</td></tr>
+    <tr><td>调音助手（自然语言调参）</td><td>用户输入的一句话，以及工程中<strong>轨道与音频块的参数</strong>（增益、声像、插件参数、音高偏移等）</td><td>用户自行配置的 DeepSeek 接口</td></tr>
+    <tr><td>个人音色补音</td><td><strong>用户选中的那一段音频</strong>（不超过 15 秒）</td><td>用户自行搭建的推理服务器（未配置时在本机运行，不发送）</td></tr>
+  </tbody>
+</table>
+<p>明确不发送的内容：完整歌曲、其他音轨的音频、文件路径、文件名、工程名、以及任何与本机相关的标识信息。用户未配置相应服务时，上述功能不可用，软件不会自行连接任何服务器。</p>
+<p>AI 伴奏生成与调音助手会把内容交给第三方服务平台处理，该平台对数据的处理适用其自身的隐私政策。</p>
+
+<h2>五、模型文件</h2>
+<p>语音识别与 AI 降噪使用本地模型，模型文件在用户确认后从公开地址下载到本机，下载过程不携带任何用户数据。</p>
+
+<h2>六、儿童</h2>
+<p>本软件不面向儿童单独收集任何信息，也不存在账号体系。</p>
+
+<h2>七、数据删除</h2>
+<p>删除本机的工程文件、媒体文件或整个数据目录，即可删除对应数据。本软件不在任何服务器上保留用户数据的副本。</p>
+
+<h2>八、政策变更</h2>
+<p>本政策如有变更，将随软件版本更新发布，并在本页面标注新的生效日期。</p>
+
+<h2>九、联系方式</h2>
+<p>如有隐私相关问题，请通过以下方式联系：</p>
+<ul>
+  <li>项目主页：<a href="https://github.com/IMXia-Chan">https://github.com/IMXia-Chan</a></li>
+  <li>Microsoft Store 应用页面：可在《声麦 Studio Pro》的商店页面留言或评价</li>
+</ul>
+
+</main>
+</body>
+</html>
