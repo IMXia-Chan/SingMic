@@ -15,15 +15,18 @@ This product includes software and model weights developed by third parties:
    - The Python package `deepfilter_stream` is an optional dependency and is
      NOT redistributed in this repository; install it with pip.
 
-2. pedalboard (optional VST3 hosting)
+2. pedalboard 0.9.26 (VST3 hosting)
    - Project: https://github.com/spotify/pedalboard
-   - License: GPL-3.0
-   - State: **optional external dependency**, listed in `requirements-vst.txt`.
-     It is NOT redistributed in this repository and is NOT imported by the
-     server process. It is used only inside a separate helper process
-     (`studio_vst_worker.py`) that the studio spawns on demand for offline
-     rendering. Without it installed, the rest of SingMic runs normally and
-     the VST tab reports that the host is unavailable.
+   - License: GPL-3.0 (compatible with this project's own GPL-3.0 license;
+     the full GPL-3.0 text is in `LICENSE`)
+   - It is NOT redistributed in this source repository; the source code can be
+     obtained from the upstream project at the version listed above. In the
+     binary distribution (the Microsoft Store package), pedalboard is bundled
+     in unmodified form so that VST3 hosting works out of the box.
+   - It is not imported by the server process. It is used only inside a
+     separate helper process (`studio_vst_worker.py`) that the studio spawns
+     on demand for offline rendering. If the host is unavailable, the rest of
+     SingMic runs normally and the VST tab reports that fact.
    - VST3 plug-ins themselves are supplied by the user; no plug-in binaries
      are distributed with this repository, and their licenses are the user's
      responsibility.
